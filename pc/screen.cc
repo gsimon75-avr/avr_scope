@@ -27,14 +27,6 @@ const char init_cmd[] = "1R3S";
 
 static uint16_t voltage_factor;
 
-typedef enum {
-    TRIG_WAIT_PRE,
-    TRIG_WAIT,
-    TRIG_RUN
-} trig_state_t;
-
-trig_state_t trig_state = TRIG_RUN;
-
 int curX = 0;
 uint32_t screen[SCREEN_HEIGHT*SCREEN_WIDTH];
 uint32_t* lastOfs[SCREEN_WIDTH];
@@ -49,6 +41,7 @@ SDL_Rect dst_density { DENSITY_X, DENSITY_Y, DENSITY_WIDTH, DENSITY_HEIGHT };
 void
 add_sample(uint8_t y) {
     bool need_redraw = false;
+    bool end_of_sweep = (y == 0xff);
 
     y = (voltage_factor * y) >> 8;
     
@@ -61,55 +54,20 @@ add_sample(uint8_t y) {
         need_redraw = true;
     }
 
-    switch (trig_state) {
-        case TRIG_WAIT_PRE:
-        switch (trig_type) {
-            case TRIG_RISING: // first wait for low
-            if (y < trig_low)
-                trig_state = TRIG_WAIT;
-            break;
-
-            case TRIG_FALLING: // first wait for high
-            if (y >= trig_high)
-                trig_state = TRIG_WAIT;
-            break;
-
-            default: // shouldn't happen, fix it
-            trig_state = TRIG_RUN;
-            break;
-        }
-        break;
-
-        case TRIG_WAIT:
-        switch (trig_type) {
-            case TRIG_RISING: // now wait for high
-            if (y >= trig_high)
-                trig_state = TRIG_RUN;
-            break;
-
-            case TRIG_FALLING: // now wait for low
-            if (y < trig_low)
-                trig_state = TRIG_RUN;
-            break;
-
-            default: // shouldn't happen, fix it
-            trig_state = TRIG_RUN;
-            break;
-        }
-        break;
-
-        case TRIG_RUN: {
-            reinterpret_cast<uint8_t*>(lastOfs[curX])[1] = 0;
-            lastOfs[curX] = &screen[(SCREEN_WIDTH * (unsigned int)(255 - y)) + curX];
-            reinterpret_cast<uint8_t*>(lastOfs[curX])[1] = 0xff;
+    if (curX < SCREEN_WIDTH) {
+        reinterpret_cast<uint8_t*>(lastOfs[curX])[1] = 0;
+        lastOfs[curX] = &screen[(SCREEN_WIDTH * (unsigned int)(255 - y)) + curX];
+        reinterpret_cast<uint8_t*>(lastOfs[curX])[1] = 0xff;
+        ++curX;
+        if (curX == SCREEN_WIDTH) {
+            need_redraw = true;
             ++curX;
-            if (curX >= SCREEN_WIDTH) {
-                curX = 0;
-                trig_state = (trig_type == TRIG_NONE) ? TRIG_RUN : TRIG_WAIT_PRE;
-                need_redraw = true;
-            }
         }
-        break;
+    }
+    
+    if (end_of_sweep) {
+        need_redraw = true;
+        curX = 0;
     }
     
     if (need_redraw) {
@@ -213,11 +171,11 @@ init_screen(const char *devname) {
         ioctl(fd_serial, TCGETS2, &tio2);
         tio2.c_cflag &= ~CBAUD;
         tio2.c_cflag |= BOTHER;
-        tio2.c_ispeed = tio2.c_ospeed = 2000000;
+        tio2.c_ispeed = tio2.c_ospeed = 250000;
         ioctl(fd_serial, TCSETS2, &tio2);
     }
 #elif __FreeBSD__
-    tio.c_ispeed = tio.c_ospeed = 2000000;
+    tio.c_ispeed = tio.c_ospeed = 250000;
     tcsetattr(fd_serial, TCSANOW, &tio);
 #endif
 
@@ -254,6 +212,22 @@ set_voltage_ref(uint8_t n) {
     usleep(1000); write(fd_serial, buf + 0, 1);
     usleep(1000); write(fd_serial, buf + 1, 1);
     voltage_factor = voltage_factors[n];
+}
+
+void
+set_trig_level(uint8_t n) {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%02XL", n);
+    usleep(1000); write(fd_serial, buf + 0, 1);
+    usleep(1000); write(fd_serial, buf + 1, 1);
+}
+
+void
+set_trig_type(trig_type_t type) {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%XT", type & 3);
+    usleep(1000); write(fd_serial, buf + 0, 1);
+    usleep(1000); write(fd_serial, buf + 1, 1);
 }
 
 void

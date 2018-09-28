@@ -50,7 +50,7 @@ main(int argc, char **argv) {
         ioctl(fd_serial, TCGETS2, &tio2);
         tio2.c_cflag &= ~CBAUD;
         tio2.c_cflag |= BOTHER;
-        tio2.c_ispeed = tio2.c_ospeed = 2000000;
+        tio2.c_ispeed = tio2.c_ospeed = 250000;
         ioctl(fd_serial, TCSETS2, &tio2);
     }
 #elif __FreeBSD__
@@ -59,7 +59,7 @@ main(int argc, char **argv) {
     if (argc > 1)
         tio.c_ispeed = tio.c_ospeed = atol(argv[1]);
     else
-        tio.c_ispeed = tio.c_ospeed = 2000000;
+        tio.c_ispeed = tio.c_ospeed = 250000;
     //tio.c_ispeed = tio.c_ospeed = 2000000;
     //tio.c_ispeed = tio.c_ospeed = 8000000;
     res = tcsetattr(fd_serial, TCSANOW, &tio);

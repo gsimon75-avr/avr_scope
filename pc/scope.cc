@@ -26,20 +26,6 @@ int voltage_ref = 1;
 
 trig_type_t trig_type = TRIG_NONE;
 uint8_t trig_level = 0x80;
-uint8_t trig_hist = 4;
-uint8_t trig_low, trig_high;
-
-void
-set_trig_level(uint8_t n) {
-    trig_level = n;
-    trig_low = (trig_level > trig_hist) ? trig_level - trig_hist : 1;
-    trig_high = (trig_level < (0xff - trig_hist)) ? trig_level + trig_hist : 0xff;
-}
-
-void
-set_trig_type(trig_type_t type) {
-    trig_type = type;
-}
 
 int
 main(int argc, char **argv) {
@@ -142,6 +128,7 @@ main(int argc, char **argv) {
     shutdown_ui();
     printf("bye\n");
 
+    SDL_RenderClear(renderer);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();
