@@ -23,7 +23,7 @@
 
 SDL_Thread *thr_serial;
 int fd_serial = -1;
-const char init_cmd[] = "1R3S";
+const char init_cmd[] = "1R3S80L0T";
 
 static uint16_t voltage_factor;
 
@@ -220,6 +220,7 @@ set_trig_level(uint8_t n) {
     snprintf(buf, sizeof(buf), "%02XL", n);
     usleep(1000); write(fd_serial, buf + 0, 1);
     usleep(1000); write(fd_serial, buf + 1, 1);
+    usleep(1000); write(fd_serial, buf + 2, 1);
 }
 
 void

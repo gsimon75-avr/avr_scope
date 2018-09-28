@@ -1,5 +1,5 @@
 ; Expected symbols (via -Dname=value in commandline)
-; F_CPU	cpu freq in Hz
+; F_CPU cpu freq in Hz
 
 include(boilerplate.m4)
 include(iosyms.m4)
@@ -7,19 +7,26 @@ include(iosyms.m4)
 define({RECV_BUF_SIZE}, 4)
 define({NUM_SAMPLES}, 512)
 define({USE_BAUD}, BAUDVALUE(250000))
+define({TRIG_HIST}, 4)
+define({TRIG_NONE}, 0)
+define({TRIG_RISING}, 1)
+define({TRIG_FALLING}, 2)
 
 ; register mapping
 define({cmd_start_adc}, r9)
-define({trig_type}, r10)
 define({trig_level}, r11)
 define({usart_sreg_tmp}, r12)
 define({adc_sreg_tmp}, r14)
 ; generic working registers: r16, r17
+define({trig_type}, r25)
 ; sample_ptr X[H,L] address of the next sample: r26, r27
 ; recv_ptr Y[H,L], used by recvd_push and recvd_pop: r28, r29
 ; pointer to the appropriate delay code block Z[H,L]: r30, r31
 
+define({BAUDVALUE}, {eval((F_CPU / (8*($1))) - 1)})
+
 ; ------------------------------------------------------------------------------
+.CSEG
 .org 0
 jmp(main)
 
@@ -56,8 +63,7 @@ nop()
 rcall(trap)
 nop()
 
-;rjmp(TIMER1_COMPB_vect)
-reti
+rcall(trap)
 nop
 
 rcall(trap)
@@ -78,12 +84,10 @@ nop()
 rjmp(USART_RX_vect)
 nop
 
-;rjmp(USART_UDRE_vect)
-rcall(trap)
+rjmp(USART_UDRE_vect)
 nop()
 
-;rcall(trap)
-rjmp(USART_UDRE_vect)
+rcall(trap)
 nop()
 
 rcall(trap)
@@ -101,472 +105,485 @@ nop()
 rcall(trap)
 nop()
 
-.CSEG
 FUNCTION(trap)
-	cli
-	pop(r16)
-	lsr(r16)
-	lsr(r16)
-	dec(r16)
-	rcall(led_num)
-	ldi(r16, 1)
-	rcall(led_dot)
+    cli
+    pop(r16)
+    lsr(r16)
+    lsr(r16)
+    dec(r16)
+    andi(r16, 0x0f)
+    rcall(led_num)
+    ldi(r16, 1)
+    rcall(led_dot)
   LOC(q):
-	rjmp(LOC(q))
+    rjmp(LOC(q))
 ENDFUNC
 
-
-; ------------------------------------------------------------------------------
-.CSEG
-
 FUNCTION(led_num)
-	; In: r16 = n
-	; Out: none
-	; Changes: SREG
-	
-	push(ZL)
-	push(ZH)
-	cpi(r16, 0x10)
-	brsh(LOC(OFF))
+    ; In: r16 = n
+    ; Out: none
+    ; Changes: SREG
+    
+    push(ZL)
+    push(ZH)
+    cpi(r16, 0x10)
+    brsh(LOC(OFF))
 
-	mov(ZL, r16)
-	clr(ZH)
-	addiw(ZL, ZH, led_b210 << 1)
-	lpm(ZH, Z)
-	in(ZL, PORTB)
-	andi(ZL, 0xf8)
-	or(ZL, ZH)
-	out(PORTB, ZL)
-	
-	mov(ZL, r16)
-	clr(ZH)
-	addiw(ZL, ZH, led_d7654 << 1)
-	lpm(ZH, Z)
-	in(ZL, PORTD)
-	andi(ZL, 0x0f)
-	or(ZL, ZH)
-	out(PORTD, ZL)
-	pop(ZH)
-	pop(ZL)
-	ret()
+    mov(ZL, r16)
+    clr(ZH)
+    addiw(ZL, ZH, led_b210 << 1)
+    lpm(ZH, Z)
+    in(ZL, PORTB)
+    andi(ZL, 0xf8)
+    or(ZL, ZH)
+    out(PORTB, ZL)
+    
+    mov(ZL, r16)
+    clr(ZH)
+    addiw(ZL, ZH, led_d7654 << 1)
+    lpm(ZH, Z)
+    in(ZL, PORTD)
+    andi(ZL, 0x0f)
+    or(ZL, ZH)
+    out(PORTD, ZL)
+    pop(ZH)
+    pop(ZL)
+    ret()
 
   LOC(OFF):
-	in(ZL, PORTB)
-	andi(ZL, 0xf8)
-	out(PORTB, ZL)
-	
-	in(ZL, PORTD)
-	andi(ZL, 0x0f)
-	out(PORTD, ZL)
-	pop(ZH)
-	pop(ZL)
-	ret()
+    in(ZL, PORTB)
+    andi(ZL, 0xf8)
+    out(PORTB, ZL)
+    
+    in(ZL, PORTD)
+    andi(ZL, 0x0f)
+    out(PORTD, ZL)
+    pop(ZH)
+    pop(ZL)
+    ret()
 ENDFUNC ; led_num
 
 
 FUNCTION(led_dot)
-	; In: r16 = onoff
-	; Out: none
-	; Changes: SREG
-	cpi(r16, 0)
-	breq(LOC(OFF))
-	sbi(PORTD, 2)
-	ret()
+    ; In: r16 = onoff
+    ; Out: none
+    ; Changes: SREG
+    cpi(r16, 0)
+    breq(LOC(OFF))
+    sbi(PORTD, 2)
+    ret()
   LOC(OFF):
-	cbi(PORTD, 2)
-	ret()
+    cbi(PORTD, 2)
+    ret()
 ENDFUNC ; led_dot
 
 
 FUNCTION(recvd_push)
-	; In: r16 = x
-	; Out: None
-	; Changes: Y
-	;
-	; check wrap -> store -> increment
-	cpi(YH, (recv_buf + RECV_BUF_SIZE) >> 8)
-	brlo(LOC(NO_WRAP_AROUND))
-	cpi(YL, (recv_buf + RECV_BUF_SIZE) & 0xff)
-	brlo(LOC(NO_WRAP_AROUND))
-	ldi(YL, recv_buf & 0x0f)
-	ldi(YH, recv_buf >> 8)
+    ; In: r16 = x
+    ; Out: None
+    ; Changes: Y
+    ;
+    ; check wrap -> store -> increment
+    cpi(YH, (recv_buf + RECV_BUF_SIZE) >> 8)
+    brlo(LOC(NO_WRAP_AROUND))
+    cpi(YL, (recv_buf + RECV_BUF_SIZE) & 0xff)
+    brlo(LOC(NO_WRAP_AROUND))
+    ldi(YL, recv_buf & 0x0f)
+    ldi(YH, recv_buf >> 8)
   LOC(NO_WRAP_AROUND):
-	st(Y+, r16)
-	ret()
+    st(Y+, r16)
+    ret()
 ENDFUNC ; recvd_push
 
 
 FUNCTION(recvd_pop)
-	; In: none
-	; Out: r16 = x
-	; Changes: Y
-	;
-	; decrement -> load -> check wrap
-	ld(r16, -Y)
-	cpi(YH, recv_buf >> 8)
-	brlo(LOC(WRAP_AROUND))
-	brne(LOC(NO_WRAP_AROUND))
-	cpi(YL, recv_buf & 0xff)
-	brsh(LOC(NO_WRAP_AROUND))
+    ; In: none
+    ; Out: r16 = x
+    ; Changes: Y
+    ;
+    ; decrement -> load -> check wrap
+    ld(r16, -Y)
+    cpi(YH, recv_buf >> 8)
+    brlo(LOC(WRAP_AROUND))
+    brne(LOC(NO_WRAP_AROUND))
+    cpi(YL, recv_buf & 0xff)
+    brsh(LOC(NO_WRAP_AROUND))
   LOC(WRAP_AROUND):
-	ldi(YL, (recv_buf + RECV_BUF_SIZE) & 0x0f)
-	ldi(YH, (recv_buf + RECV_BUF_SIZE) >> 8)
+    ldi(YL, (recv_buf + RECV_BUF_SIZE) & 0x0f)
+    ldi(YH, (recv_buf + RECV_BUF_SIZE) >> 8)
   LOC(NO_WRAP_AROUND):
-  	ret()
+    ret()
 ENDFUNC ; recvd_pop
 
 
 FUNCTION(recvd_pop_byte)
-	; In: none
-	; Out: r16 = x
-	; Changes: Z, r17
-	rcall(recvd_pop)
-	mov(r17, r16)
-	rcall(recvd_pop)
-	lsl(r16)
-	lsl(r16)
-	lsl(r16)
-	lsl(r16)
-	or(r16, r17)
-	ret()
+    ; In: none
+    ; Out: r16 = x
+    ; Changes: Y, r17
+    rcall(recvd_pop)
+    mov(r17, r16)
+    rcall(recvd_pop)
+    lsl(r16)
+    lsl(r16)
+    lsl(r16)
+    lsl(r16)
+    or(r16, r17)
+    ret()
 ENDFUNC ; recvd_pop_byte
 
 
 FUNCTION(USART_RX_vect)
-	in(usart_sreg_tmp, SREG)
+    in(usart_sreg_tmp, SREG)
+    push(r16)
+    push(r17)
 
-	lds(r16, UDR0)
+    lds(r16, UDR0)
 
-	cpi(r16, 'S')
-	breq(LOC(SET_SPEED))
-	cpi(r16, 'R')
-	breq(LOC(SET_VREF))
-	cpi(r16, 'T')
-	breq(LOC(SET_TRIG_TYPE))
-	cpi(r16, 'L')
-	breq(LOC(SET_TRIG_LEVEL))
+    cpi(r16, 'S')
+    breq(LOC(SET_SPEED))
+    cpi(r16, 'R')
+    breq(LOC(SET_VREF))
+    cpi(r16, 'T')
+    breq(LOC(SET_TRIG_TYPE))
+    cpi(r16, 'L')
+    breq(LOC(SET_TRIG_LEVEL))
 
-	cpi(r16, 'p')
-	breq(LOC(SET_PWM_PRESCALER))
-	cpi(r16, 't')
-	breq(LOC(SET_PWM_TOTAL))
-	cpi(r16, 'a')
-	breq(LOC(SET_PWM_ACTIVE))
+    cpi(r16, 'p')
+    breq(LOC(SET_PWM_PRESCALER))
+    cpi(r16, 't')
+    breq(LOC(SET_PWM_TOTAL))
+    cpi(r16, 'a')
+    breq(LOC(SET_PWM_ACTIVE))
 
-	cpi(r16, '0')
-	brlt(LOC(DONE))
-	cpi(r16, '9' + 1)
-	brge(LOC(NOT_09))
-	subi(r16, '0')
-	rjmp(LOC(DIGIT))
+    cpi(r16, '0')
+    brlt(LOC(DONE))
+    cpi(r16, '9' + 1)
+    brge(LOC(NOT_09))
+    subi(r16, '0')
+    rjmp(LOC(DIGIT))
 
   LOC(NOT_09):
-	cpi(r16, 'A')
-	brlt(LOC(DONE))
-	cpi(r16, 'F' + 1)
-	brge(LOC(NOT_AF))
-	subi(r16, 'A' - 10)
-	rjmp(LOC(DIGIT))
+    cpi(r16, 'A')
+    brlt(LOC(DONE))
+    cpi(r16, 'F' + 1)
+    brge(LOC(NOT_AF))
+    subi(r16, 'A' - 10)
+    rjmp(LOC(DIGIT))
 
   LOC(NOT_AF):
-	cpi(r16, 'a')
-	brlt(LOC(DONE))
-	cpi(r16, 'f' + 1)
-	brge(LOC(DONE))
-	subi(r16, 'a' - 10)
+    cpi(r16, 'a')
+    brlt(LOC(DONE))
+    cpi(r16, 'f' + 1)
+    brge(LOC(DONE))
+    subi(r16, 'a' - 10)
 
   LOC(DIGIT):
-	rcall(recvd_push)
+    rcall(recvd_push)
 
   LOC(DONE):
-	out(SREG, usart_sreg_tmp)
-	reti()
+    pop(r17)
+    pop(r16)
+    out(SREG, usart_sreg_tmp)
+    reti()
 
   LOC(SET_SPEED):
-  	rcall(recvd_pop)
-	andi(r16, 0x03)
-	; FIXME: rcall(set_sample_rate)
-	rjmp(LOC(DONE))
+    rcall(recvd_pop)
+    andi(r16, 0x03)
+    ; FIXME: rcall(set_sample_rate)
+    rjmp(LOC(DONE))
 
   LOC(SET_VREF):
-  	rcall(recvd_pop)
-	andi(r16, 0x01)
-	sbrc(r16, 0)
-	ldi(r16, _BV(REFS1)) ; ref=AVcc
-	addi(r16, _BV(ADLAR, REFS1, REFS0) | 0) ; input=C0, left adjust, ref={AVcc or bandgap 1.1V}
-	sts(ADMUX, r16)
-	rjmp(LOC(DONE))
+    rcall(recvd_pop)
+    andi(r16, 0x01)
+    sbrc(r16, 0)
+    ldi(r16, _BV(REFS1)) ; ref=AVcc
+    addi(r16, _BV(ADLAR, REFS1, REFS0) | 0) ; input=C0, left adjust, ref={AVcc or bandgap 1.1V}
+    sts(ADMUX, r16)
+    rjmp(LOC(DONE))
 
   LOC(SET_TRIG_TYPE):
-  	rcall(recvd_pop)
-	andi(r16, 0x03)
-	mov(trig_type, r16)
-	rjmp(LOC(DONE))
+    rcall(recvd_pop)
+    andi(r16, 0x03)
+    mov(trig_type, r16)
+    rjmp(LOC(DONE))
 
   LOC(SET_TRIG_LEVEL):
-  	rcall(recvd_pop_byte)
-	mov(trig_level, r16)
-	rjmp(LOC(DONE))
+    rcall(recvd_pop_byte)
+    mov(trig_level, r16)
+    rjmp(LOC(DONE))
 
   LOC(SET_PWM_PRESCALER):
-  	rcall(recvd_pop)
-	andi(r16, 0x07)
-	ori(r16, _BV(WGM22))
-	sts(TCCR2B, r16)
-	rjmp(LOC(DONE))
+    rcall(recvd_pop)
+    andi(r16, 0x07)
+    ori(r16, _BV(WGM22))
+    sts(TCCR2B, r16)
+    rjmp(LOC(DONE))
 
   LOC(SET_PWM_TOTAL):
-  	rcall(recvd_pop_byte)
-	sts(OCR2A, r16) ; pwm wave length
-	rjmp(LOC(DONE))
+    rcall(recvd_pop_byte)
+    sts(OCR2A, r16) ; pwm wave length
+    rjmp(LOC(DONE))
 
   LOC(SET_PWM_ACTIVE):
-  	rcall(recvd_pop_byte)
-	sts(OCR2B, r16) ; pwm wave length
-	rjmp(LOC(DONE))
+    rcall(recvd_pop_byte)
+    sts(OCR2B, r16) ; pwm wave length
+    rjmp(LOC(DONE))
 ENDFUNC ; USART_RX_vect
 
 FUNCTION(USART_UDRE_vect)
-	cpi(XH, (samples + NUM_SAMPLES) >> 8)
-	brlo(LOC(NEXT_SAMPLE))
-	cpi(XL, (samples + NUM_SAMPLES) & 0xff)
-	breq(LOC(LAST_SAMPLE))
-	brlo(LOC(NEXT_SAMPLE))
-	set()
-	reti()
+    in(usart_sreg_tmp, SREG)
+    cpi(XH, (samples + NUM_SAMPLES) >> 8)
+    brlo(LOC(NEXT_SAMPLE))
+    cpi(XL, (samples + NUM_SAMPLES) & 0xff)
+    breq(LOC(LAST_SAMPLE))
+    brlo(LOC(NEXT_SAMPLE))
+    out(SREG, usart_sreg_tmp)
+    set()
+    reti()
 
   LOC(LAST_SAMPLE):
     adiw(XL, 1)
-	ldi(r16, 0xff)
-	sts(UDR0, r16)
-	reti()
-	
+    ldi(r16, 0xff)
+    rjmp(LOC(NOT_MAX))
+    
   LOC(NEXT_SAMPLE):
     ld(r16, X+)
-	cpi(r16, 0xff)
-	brne(LOC(NOT_MAX))
-	dec(r16)
+    cpi(r16, 0xff)
+    brne(LOC(NOT_MAX))
+    dec(r16)
   LOC(NOT_MAX):
-	sts(UDR0, r16)
-	reti()
+    sts(UDR0, r16)
+    out(SREG, usart_sreg_tmp)
+    reti()
 ENDFUNC ; USART_UDRE_vect
+
+FUNCTION(read_adc)
+    ; In: None
+    ; Out: r16
+    sts(ADCSRA, cmd_start_adc)
+  LOC(WAIT_COMPLETE):
+    lds(r16, ADCSRA)
+    andi(r16, _BV(ADSC))
+    brne(LOC(WAIT_COMPLETE))
+    lds(r16, ADCH)
+    ; limit to [TRIG_HIST, 0xff - TRIG_HIST]
+    cpi(r16, TRIG_HIST)
+    brsh(LOC(HIGH_ENOUGH))
+    ldi(r16, TRIG_HIST)
+    rjmp(LOC(DONE))
+  LOC(HIGH_ENOUGH):
+    cpi(r16, 0xff - TRIG_HIST)
+    brlo(LOC(DONE))
+    ldi(r16, 0xff - TRIG_HIST)
+  LOC(DONE):
+    ret
+ENDFUNC ; read_adc
+
 
 ; ------------------------------------------------------------------------------
 
-define({BAUDVALUE}, {eval((F_CPU / (8*($1))) - 1)})
-
 FUNCTION(main)
-	; Switch off unneeded subsystems
-	ldi(r16, _BV(PRTWI, PRTIM0, PRSPI0))
-	sts(PRR, r16)
+    ; Switch off unneeded subsystems
+    ldi(r16, _BV(PRTWI, PRTIM0, PRSPI0))
+    sts(PRR, r16)
 
-	; B[0..2] are output (lcd)
-	in(r16, DDRB)
-	ori(r16, 0x07)
-	out(DDRB, r16)
-	
-	; D[2,4..7] are output (lcd), D3 is output (pwm)
-	in(r16, DDRD)
-	ori(r16, 0xfc)
-	out(DDRD, r16)
-	
-	; C0 is input (adc)
-	in(r16, DDRC)
-	andi(r16, ~_BV(0))
-	out(DDRC, r16)
-	; C[0] is analogue input (adc)
-	ldi(r16,  _BV(0))
-	sts(DIDR0, r16)
+    ; B[0..2] are output (lcd)
+    in(r16, DDRB)
+    ori(r16, 0x07)
+    out(DDRB, r16)
+    
+    ; D[2,4..7] are output (lcd), D3 is output (pwm)
+    in(r16, DDRD)
+    ori(r16, 0xfc)
+    out(DDRD, r16)
+    
+    ; C0 is input (adc)
+    in(r16, DDRC)
+    andi(r16, ~_BV(0))
+    out(DDRC, r16)
+    ; C[0] is analogue input (adc)
+    ldi(r16,  _BV(0))
+    sts(DIDR0, r16)
 
-	; Set up Timer2 for FastPWM mode
-	ldi(r16, _BV(COM2B1, WGM21, WGM20))
-	sts(TCCR2A, r16)
-	ldi(r16, _BV(WGM22) | 6) ; FIXME: prescaler hardwired
-	sts(TCCR2B, r16)
-	ldi(r16, 0x30)
-	sts(OCR2A, r16) ; pwm wave length
-	ldi(r16, 0x20)
-	sts(OCR2B, r16) ; pwm high state length, must be < wave length
+    ; Set up Timer2 for FastPWM mode
+    ldi(r16, _BV(COM2B1, WGM21, WGM20))
+    sts(TCCR2A, r16)
+    ldi(r16, _BV(WGM22) | 6) ; FIXME: prescaler hardwired
+    sts(TCCR2B, r16)
+    ldi(r16, 0x30)
+    sts(OCR2A, r16) ; pwm wave length
+    ldi(r16, 0x20)
+    sts(OCR2B, r16) ; pwm high state length, must be < wave length
 
-	; Set up ADC
-	ldi(r16, _BV(ADLAR, REFS0)) ; 20 mV per unit
-	sts(ADMUX, r16)
-	ldi(r16, _BV(ADEN, ADSC) | 3) ; FIXME: prescaler now hardwired
-	mov(cmd_start_adc, r16)
+    ; Set up ADC
+    ldi(r16, _BV(ADLAR, REFS0)) ; 20 mV per unit
+    sts(ADMUX, r16)
+    ldi(r16, _BV(ADEN, ADSC) | 3) ; FIXME: prescaler now hardwired
+    mov(cmd_start_adc, r16)
 
-	; Set up USART recv buffer pointer
-	ldi(YL, recv_buf & 0x0f)
-	ldi(YH, recv_buf >> 8)
-	; Usart to USE_BAUD, 8 data, even pty, 1 stop, rx data irq
-	ldi(r16, HI8(USE_BAUD))
-	sts(UBRR0H, r16)
-	ldi(r16, LO8(USE_BAUD))
-	sts(UBRR0L, r16)
-	ldi(r16, _BV(U2X0))
-	sts(UCSR0A, r16)
-	ldi(r16, _BV(UCSZ01, UCSZ00, UPM01)) ; 8bits, even pty, 1 stop
-	sts(UCSR0C, r16)
-	;ldi(r16, _BV(RXEN0, TXEN0, RXCIE0, UDRIE0))
-	ldi(r16, _BV(RXEN0, TXEN0, RXCIE0, TXCIE0))
-	sts(UCSR0B, r16) ; Enable USART
+    ; Set up USART recv buffer pointer
+    ldi(YL, recv_buf & 0x0f)
+    ldi(YH, recv_buf >> 8)
+    ; Usart to USE_BAUD, 8 data, even pty, 1 stop, rx data irq
+    ldi(r16, HI8(USE_BAUD))
+    sts(UBRR0H, r16)
+    ldi(r16, LO8(USE_BAUD))
+    sts(UBRR0L, r16)
+    ldi(r16, _BV(U2X0))
+    sts(UCSR0A, r16)
+    ldi(r16, _BV(UCSZ01, UCSZ00, UPM01)) ; 8bits, even pty, 1 stop
+    sts(UCSR0C, r16)
+    ldi(r16, _BV(RXEN0, TXEN0, RXCIE0, UDRIE0))
+    sts(UCSR0B, r16) ; Enable USART
 
-	; Set up delay block address
-	ldi(ZH, LOC(delay_100us) >> 8)
-	ldi(ZL, LOC(delay_100us) & 0xff)
+    ; Set up delay block address
+    ldi(ZH, LOC(delay_100us) >> 8)
+    ldi(ZL, LOC(delay_100us) & 0xff)
 
-	; Set up sample buffer pointer
-	ldi(XL, samples & 0x0f)
-	ldi(XH, samples >> 8)
+    ; Set up sample buffer pointer
+    ldi(XL, samples & 0x0f)
+    ldi(XH, samples >> 8)
 
-	; Read the next sweep of samples
-	; NOTE: The loop without the delay code is 10 clks,
-	; the rest shall be added explicitely
+    ; Set up trigger
+    ldi(trig_type, TRIG_NONE)
+    ldi(r16, 0x80)
+    mov(trig_level, r16)
+
+    ; Read the next sweep of samples
+    ; NOTE: The loop without the delay code is 10 clks,
+    ; the rest shall be added explicitely
  LOC(NEXT_SAMPLE):
-	lds(r16, ADCH) ; 1 clk
-	sts(ADCSRA, cmd_start_adc) ; 1 clk
-	st(X+, r16) ; 1 clk
-	ijmp() ; 2 clks ; to the appropriate delay block
+    lds(r16, ADCH) ; 1 clk
+    sts(ADCSRA, cmd_start_adc) ; 1 clk
+    st(X+, r16) ; 1 clk
+    ijmp() ; 2 clks ; to the appropriate delay block
 
   LOC(GO_NEXT_SAMPLE): ; NOTE: adds 2 clks before jumpint to NEXT_SAMPLE
-	rjmp(LOC(NEXT_SAMPLE)) ; 2 clks
+    rjmp(LOC(NEXT_SAMPLE)) ; 2 clks
 
   LOC(delay_100us): ; 100 us = 1600 clks, 1590 to go
-	; Wait some amount: 1 + 227*(2+2+1+2) = 1 + 227*7 = 1590
-	ldi(r16, 227); 1 clk
+    ; Wait some amount: 1 + 227*(2+2+1+2) = 1 + 227*7 = 1590
+    ldi(r16, 227); 1 clk
   LOC(wait100_loop):
-  	rjmp(LOC(wait100_loop_1)) ; 2 clks
+    rjmp(LOC(wait100_loop_1)) ; 2 clks
   LOC(wait100_loop_1):
-  	rjmp(LOC(wait100_loop_2)) ; 2 clks
+    rjmp(LOC(wait100_loop_2)) ; 2 clks
   LOC(wait100_loop_2):
-	dec(r16) ; 1 clk
-	brne(LOC(wait100_loop)); 2 clks
-	nop()
-	; wait done
-	cpi(XH, (samples + NUM_SAMPLES) >> 8) ; 1 clk
-	brne(LOC(GO_NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
-	cpi(XL, (samples + NUM_SAMPLES) & 0xff) ; 1 clk
-	brne(LOC(NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
-	rjmp(LOC(SEND_SAMPLES))
+    dec(r16) ; 1 clk
+    brne(LOC(wait100_loop)); 2 clks
+    nop()
+    ; wait done
+    cpi(XH, (samples + NUM_SAMPLES) >> 8) ; 1 clk
+    brne(LOC(GO_NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
+    cpi(XL, (samples + NUM_SAMPLES) & 0xff) ; 1 clk
+    brne(LOC(NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
+    rjmp(LOC(SEND_SAMPLES))
 
   LOC(delay_50us): ; 50 us = 800 clks, 790 to go
-	; Wait some amount: 1 + 2 + 197*(1+1+2) - 1 = 3 + 197*4 - 1 = 790
-	ldi(r16, 197) ; 1 clk
-	rjmp(LOC(wait50_pre)) ; 2 clks
+    ; Wait some amount: 1 + 2 + 197*(1+1+2) - 1 = 3 + 197*4 - 1 = 790
+    ldi(r16, 197) ; 1 clk
+    rjmp(LOC(wait50_pre)) ; 2 clks
   LOC(wait50_pre):
-  	rjmp(LOC(wait50_loop)) ; 2 clks
+    rjmp(LOC(wait50_loop)) ; 2 clks
   LOC(wait50_loop):
-  	nop(); 1 clk
-	dec(r16) ; 1 clk
-	brne(LOC(wait50_loop)); 2 clks
-	; nop ; -1 clk, because it's already calculated in the '2 clks' above
-	; wait done
-	cpi(XH, (samples + NUM_SAMPLES) >> 8) ; 1 clk
-	brne(LOC(GO_NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
-	cpi(XL, (samples + NUM_SAMPLES) & 0xff) ; 1 clk
-	brne(LOC(NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
-	rjmp(LOC(SEND_SAMPLES))
+    nop(); 1 clk
+    dec(r16) ; 1 clk
+    brne(LOC(wait50_loop)); 2 clks
+    ; nop ; -1 clk, because it's already calculated in the '2 clks' above
+    ; wait done
+    cpi(XH, (samples + NUM_SAMPLES) >> 8) ; 1 clk
+    brne(LOC(GO_NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
+    cpi(XL, (samples + NUM_SAMPLES) & 0xff) ; 1 clk
+    brne(LOC(NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
+    rjmp(LOC(SEND_SAMPLES))
 
   LOC(delay_20us): ; 20 us = 320 clks, 310 to go
-	; Wait some amount: 1 + 103*(1+2) = 1 + 103*3 = 310
-	ldi(r16, 103); 1 clk
+    ; Wait some amount: 1 + 103*(1+2) = 1 + 103*3 = 310
+    ldi(r16, 103); 1 clk
   LOC(wait20_loop):
-	dec(r16) ; 1 clk
-	brne(LOC(wait20_loop)); 2 clks
-	nop()
-	; wait done
-	cpi(XH, (samples + NUM_SAMPLES) >> 8) ; 1 clk
-	brne(LOC(GO_NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
-	cpi(XL, (samples + NUM_SAMPLES) & 0xff) ; 1 clk
-	brne(LOC(NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
-	rjmp(LOC(SEND_SAMPLES))
+    dec(r16) ; 1 clk
+    brne(LOC(wait20_loop)); 2 clks
+    nop()
+    ; wait done
+    cpi(XH, (samples + NUM_SAMPLES) >> 8) ; 1 clk
+    brne(LOC(GO_NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
+    cpi(XL, (samples + NUM_SAMPLES) & 0xff) ; 1 clk
+    brne(LOC(NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
+    rjmp(LOC(SEND_SAMPLES))
 
   LOC(delay_10us): ; 10 us = 160 clks, 150 to go
-	; Wait some amount: 1 + 50*(1+2) - 1 = 150
-	ldi(r16, 50) ; 1 clk
+    ; Wait some amount: 1 + 50*(1+2) - 1 = 150
+    ldi(r16, 50) ; 1 clk
   LOC(wait10_loop):
-	dec(r16) ; 1 clk
-	brne(LOC(wait10_loop)); 2 clks
-	; nop ; -1 clk, because it's already calculated in the '2 clks' above
-	; wait done
-	cpi(XH, (samples + NUM_SAMPLES) >> 8) ; 1 clk
-	brne(LOC(GO_NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
-	cpi(XL, (samples + NUM_SAMPLES) & 0xff) ; 1 clk
-	brne(LOC(NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
-	rjmp(LOC(SEND_SAMPLES))
+    dec(r16) ; 1 clk
+    brne(LOC(wait10_loop)); 2 clks
+    ; nop ; -1 clk, because it's already calculated in the '2 clks' above
+    ; wait done
+    cpi(XH, (samples + NUM_SAMPLES) >> 8) ; 1 clk
+    brne(LOC(GO_NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
+    cpi(XL, (samples + NUM_SAMPLES) & 0xff) ; 1 clk
+    brne(LOC(NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
+    rjmp(LOC(SEND_SAMPLES))
 
   ; ----
 
   LOC(SEND_SAMPLES):
-	; Send them to the USART
-	ldi(XL, samples & 0x0f)
-	ldi(XH, samples >> 8)
-	clt()
-	rcall(USART_UDRE_vect) ; will enable interrupts on return
-	
+    ; Send them to the USART
+    ldi(XL, samples & 0x0f)
+    ldi(XH, samples >> 8)
+    clt()
+    rcall(USART_UDRE_vect) ; will enable interrupts on return
+    
   LOC(WAIT_SEND_COMPLETE):
     brtc(LOC(WAIT_SEND_COMPLETE))
-	cli()
 
-	; TODO: Wait for trig pre-condition
+    cpi(trig_type, TRIG_RISING)
+    breq(LOC(WAIT_TRIG_RISING))
+    cpi(trig_type, TRIG_FALLING)
+    breq(LOC(WAIT_TRIG_FALLING))
+  LOC(TRIGGERED):
+    ; Set up sample buffer pointer
+    ldi(XL, samples & 0x0f)
+    ldi(XH, samples >> 8)
+    cli()
+    rjmp(LOC(NEXT_SAMPLE))
 
-	; TODO: Wait for trig condition
+  LOC(WAIT_TRIG_RISING): ; wait for trig pre-condition
+    rcall(read_adc)
+    addi(r16, TRIG_HIST)
+    cp(r16, trig_level)
+    brsh(LOC(WAIT_TRIG_RISING))
+  LOC(WAIT_TRIG_RISING_2): ; wait for trig condition
+    rcall(read_adc)
+    subi(r16, TRIG_HIST)
+    cp(r16, trig_level)
+    brlo(LOC(WAIT_TRIG_RISING_2))
+    rjmp(LOC(TRIGGERED))
 
-	; Set up sample buffer pointer
-	ldi(XL, samples & 0x0f)
-	ldi(XH, samples >> 8)
-	rjmp(LOC(NEXT_SAMPLE))
+  LOC(WAIT_TRIG_FALLING): ; wait for trig pre-condition
+    rcall(read_adc)
+    subi(r16, TRIG_HIST)
+    cp(r16, trig_level)
+    brlo(LOC(WAIT_TRIG_FALLING))
+  LOC(WAIT_TRIG_FALLING_2): ; wait for trig condition
+    rcall(read_adc)
+    addi(r16, TRIG_HIST)
+    cp(r16, trig_level)
+    brsh(LOC(WAIT_TRIG_FALLING_2))
+    rjmp(LOC(TRIGGERED))
+
 ENDFUNC ; main
 
 
-
 ; ------------------------------------------------------------------------------
-.CSEG
 
-led_b210:	.DB 3, 0, 5, 5, 6, 7, 7, 0, 7, 7, 6, 7, 3, 5, 7, 6
-led_d7654:	.DB 0xf0, 0x30, 0xe0, 0x70, 0x30, 0x50, 0xd0, 0x70, 0xf0, 0x70, 0xf0, 0x90, 0xc0, 0xb0, 0xc0, 0xc0
+led_b210:   .DB 3, 0, 5, 5, 6, 7, 7, 0, 7, 7, 6, 7, 3, 5, 7, 6
+led_d7654:  .DB 0xf0, 0x30, 0xe0, 0x70, 0x30, 0x50, 0xd0, 0x70, 0xf0, 0x70, 0xf0, 0x90, 0xc0, 0xb0, 0xc0, 0xc0
 
 
 ; ------------------------------------------------------------------------------
 .DSEG
-recv_buf:			.byte 1*RECV_BUF_SIZE
-samples:			.byte 1*NUM_SAMPLES
+recv_buf:           .byte 1*RECV_BUF_SIZE
+samples:            .byte 1*NUM_SAMPLES
 
-; ------------------------------------------------------------------------------
-.CSEG
-
-define({CLK_PARAM_HZ}, {ifelse(
-	eval((F_CPU /		 $1 ) < 65536), 1,
-		.DW eval(F_CPU / $1)
-		.DW eval(_BV(WGM12) + 1),
-	eval((F_CPU / (  8 * $1)) < 65536), 1,
-		.DW eval(F_CPU / (8 * $1))
-		.DW eval(_BV(WGM12) + 2),
-	eval((F_CPU / ( 64 * $1)) < 65536), 1,
-		.DW eval(F_CPU / (64 * $1))
-		.DW eval(_BV(WGM12) + 3),
-	eval((F_CPU / (256 * $1)) < 65536), 1,
-		.DW eval(F_CPU / (256 * $1))
-		.DW eval(_BV(WGM12) + 4),
-
-		.DW eval(F_CPU / (1024 * $1))
-		.DW eval(_BV(WGM12) + 5)
-	)})
-
-
-sample_clks:
-		; [0]: 10 us = 100 kHz
-		CLK_PARAM_HZ(100000)
-		; [1]: 20 us = 50 kHz
-		CLK_PARAM_HZ(50000)
-		; [2]: 50 us = 20 kHz
-		CLK_PARAM_HZ(20000)
-		; [3]: 100 us = 10 kHz
-		CLK_PARAM_HZ(10000)
-
-
-define({ADCSRA_VALUE}, {eval(_BV(ADEN, ADATE, ADIE) + MAX(1,MSB8(F_CPU/($1*13)))) })
-
-adcsra_values:
-		.DB ADCSRA_VALUE(100000), ADCSRA_VALUE(50000), ADCSRA_VALUE(20000), ADCSRA_VALUE(10000)
-
-;{ vim: set sw=4 ts=4 ft=asm noet: }
+;{ vim: set sw=4 ts=4 ft=asm et: }
