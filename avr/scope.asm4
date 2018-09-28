@@ -314,7 +314,7 @@ FUNCTION(USART_RX_vect)
 
   LOC(SET_SPEED):
   	rcall(recvd_pop)
-	andi(r16, 0x07)
+	andi(r16, 0x03)
 	rcall(set_sample_rate)
 	rjmp(LOC(DONE))
 
@@ -402,7 +402,7 @@ FUNCTION(main)
 	; Set up Timer2 for FastPWM mode
 	ldi(r16, _BV(COM2B1, WGM21, WGM20))
 	sts(TCCR2A, r16)
-	ldi(r16, _BV(WGM22) | 7) ; FIXME: prescaler is set to 7 -> 8kHz..64Hz
+	ldi(r16, _BV(WGM22) | 6) ; FIXME: prescaler hardwired
 	sts(TCCR2B, r16)
 	ldi(r16, 0x30)
 	sts(OCR2A, r16) ; pwm wave length
@@ -416,7 +416,7 @@ FUNCTION(main)
 	ldi(r16, _BV(ADLAR, REFS0)) ; 20 mV per unit
 	sts(ADMUX, r16)
 
-	ldi(r16, 7) ; 500Hz = 2ms per sample
+	ldi(r16, 3) ; [3]: 50 us = 20 kHz
 	rcall(set_sample_rate)
 
 	clr(r16)
@@ -479,19 +479,11 @@ sample_clks:
 		CLK_PARAM_HZ(20000)
 		; [3]: 100 us = 10 kHz
 		CLK_PARAM_HZ(10000)
-		; [4]: 200 us = 5 kHz
-		CLK_PARAM_HZ(5000)
-		; [5]: 500 us = 2 kHz
-		CLK_PARAM_HZ(2000)
-		; [6]: 1 ms = 1 kHz
-		CLK_PARAM_HZ(1000)
-		; [7]: 2 ms = 500 Hz
-		CLK_PARAM_HZ(500)
 
 
 define({ADCSRA_VALUE}, {eval(_BV(ADEN, ADATE, ADIE) + MAX(1,MSB8(F_CPU/($1*13)))) })
 
 adcsra_values:
-		.DB ADCSRA_VALUE(100000), ADCSRA_VALUE(50000), ADCSRA_VALUE(20000), ADCSRA_VALUE(10000), ADCSRA_VALUE(5000), ADCSRA_VALUE(2000), ADCSRA_VALUE(1000), ADCSRA_VALUE(500)
+		.DB ADCSRA_VALUE(100000), ADCSRA_VALUE(50000), ADCSRA_VALUE(20000), ADCSRA_VALUE(10000)
 
 ;{ vim: set sw=4 ts=4 ft=asm noet: }

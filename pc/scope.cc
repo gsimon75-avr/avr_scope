@@ -18,8 +18,8 @@ int quit_notify_fds[2] = { -1, -1 };
 SDL_Renderer *renderer;
 uint32_t user_event_type_base;
 
-const int sample_times[] = { 10, 20, 50, 100, 200, 500, 1000, 2000 }; // usec
-int sample_rate = 5;
+const int sample_times[] = { 10, 20, 50, 100 }; // usec
+int sample_rate = 3;
 const int voltages[] = { 5, 20 };
 const uint16_t voltage_factors[] = { 216, 250 }; // Vref / desired_unit * 256
 int voltage_ref = 1;
@@ -97,7 +97,7 @@ main(int argc, char **argv) {
                 break;
 
                 case SDLK_RIGHT:
-                if (sample_rate < 5) {
+                if (sample_rate < 3) {
                     ++sample_rate;
                     set_sample_rate(sample_rate);
                     redraw_time_scale(sample_times[sample_rate]);

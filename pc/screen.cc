@@ -23,7 +23,7 @@
 
 SDL_Thread *thr_serial;
 int fd_serial = -1;
-const char init_cmd[] = "1R 5S";
+const char init_cmd[] = "1R3S";
 
 static uint16_t voltage_factor;
 
@@ -242,7 +242,7 @@ init_screen(const char *devname) {
 void
 set_sample_rate(uint8_t n) {
     char buf[32];
-    snprintf(buf, sizeof(buf), "%XS", n & 7);
+    snprintf(buf, sizeof(buf), "%XS", n & 3);
     usleep(1000); write(fd_serial, buf + 0, 1);
     usleep(1000); write(fd_serial, buf + 1, 1);
 }
