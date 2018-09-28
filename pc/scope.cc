@@ -18,9 +18,10 @@ int quit_notify_fds[2] = { -1, -1 };
 SDL_Renderer *renderer;
 uint32_t user_event_type_base;
 
-int sample_times[] = { 10, 20, 50, 100, 200, 500, 1000, 2000 }; // usec
+const int sample_times[] = { 10, 20, 50, 100, 200, 500, 1000, 2000 }; // usec
 int sample_rate = 5;
-int voltages[] = { 5, 20 };
+const int voltages[] = { 5, 20 };
+const uint16_t voltage_factors[] = { 216, 250 }; // Vref / desired_unit * 256
 int voltage_ref = 1;
 
 trig_type_t trig_type = TRIG_NONE;

@@ -25,6 +25,8 @@ SDL_Thread *thr_serial;
 int fd_serial = -1;
 const char init_cmd[] = "1R 5S";
 
+static uint16_t voltage_factor;
+
 typedef enum {
     TRIG_WAIT_PRE,
     TRIG_WAIT,
@@ -48,6 +50,8 @@ void
 add_sample(uint8_t y) {
     bool need_redraw = false;
 
+    y = (voltage_factor * y) >> 8;
+    
     ++count_density[y];
     if (count_density[y] == 0xff) {
         for (int i = 0; i < 0xff; ++i) {
@@ -249,6 +253,7 @@ set_voltage_ref(uint8_t n) {
     snprintf(buf, sizeof(buf), "%XR", n & 3);
     usleep(1000); write(fd_serial, buf + 0, 1);
     usleep(1000); write(fd_serial, buf + 1, 1);
+    voltage_factor = voltage_factors[n];
 }
 
 void

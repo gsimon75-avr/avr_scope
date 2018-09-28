@@ -50,6 +50,8 @@ extern int quit_notify_fds[2];
 extern uint32_t user_event_type_base;
 #define UEVENT_DATA_READY 1
 
+extern const uint16_t voltage_factors[];
+
 typedef enum {
     TRIG_NONE,
     TRIG_RISING,
