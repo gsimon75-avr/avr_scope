@@ -1,0 +1,684 @@
+; Expected symbols (via -Dname=value in commandline)
+; F_CPU	cpu freq in Hz
+
+include(boilerplate.m4)
+include(iosyms.m4)
+
+define({RECV_BUF_SIZE}, 4)
+define({END_OF_TRACE}, 0xffff)
+define({USE_BAUD}, BAUDVALUE(2000000))
+
+; ------------------------------------------------------------------------------
+.org 0
+jmp(main)
+
+rcall(trap)
+nop()
+
+rcall(trap)
+nop()
+
+rcall(trap)
+nop()
+
+rcall(trap)
+nop()
+
+rcall(trap)
+nop()
+
+rcall(trap)
+nop()
+
+rcall(trap)
+nop()
+
+rcall(trap)
+nop()
+
+rcall(trap)
+nop()
+
+rcall(trap)
+nop()
+
+rcall(trap)
+nop()
+
+;rjmp(TIMER1_COMPB_vect)
+reti
+nop
+
+rcall(trap)
+nop()
+
+rcall(trap)
+nop()
+
+rcall(trap)
+nop()
+
+rcall(trap)
+nop()
+
+rcall(trap)
+nop()
+
+rjmp(USART_RX_vect)
+nop
+
+rcall(trap)
+nop()
+
+rcall(trap)
+nop()
+
+jmp(ADC_vect)
+nop
+
+rcall(trap)
+nop()
+
+rcall(trap)
+nop()
+
+rcall(trap)
+nop()
+
+rcall(trap)
+nop()
+
+.CSEG
+FUNCTION(trap)
+	cli
+	pop(r16)
+	lsr(r16)
+	lsr(r16)
+	dec(r16)
+	rcall(led_num)
+	ldi(r16, 1)
+	rcall(led_dot)
+  LOC(q):
+	rjmp(LOC(q))
+ENDFUNC
+
+
+; ------------------------------------------------------------------------------
+.CSEG
+
+FUNCTION(led_num)
+	; In: r16 = n
+	; Out: none
+	; Changes: SREG, Z
+	
+	cpi(r16, 0x10)
+	brsh(LOC(OFF))
+
+	mov(ZL, r16)
+	clr(ZH)
+	addiw(ZL, ZH, led_b210 << 1)
+	lpm(ZH, Z)
+	in(ZL, PORTB)
+	andi(ZL, 0xf8)
+	or(ZL, ZH)
+	out(PORTB, ZL)
+	
+	mov(ZL, r16)
+	clr(ZH)
+	addiw(ZL, ZH, led_d7654 << 1)
+	lpm(ZH, Z)
+	in(ZL, PORTD)
+	andi(ZL, 0x0f)
+	or(ZL, ZH)
+	out(PORTD, ZL)
+	ret
+
+  LOC(OFF):
+	in(ZL, PORTB)
+	andi(ZL, 0xf8)
+	out(PORTB, ZL)
+	
+	in(ZL, PORTD)
+	andi(ZL, 0x0f)
+	out(PORTD, ZL)
+	ret
+ENDFUNC ; led_num
+
+
+FUNCTION(led_dot)
+	; In: r16 = onoff
+	; Out: none
+	; Changes: SREG
+	in(ZL, PORTD)
+	andi(ZL, 0xfb)
+	sbrc(r16, 0)
+	ori(ZL, 0x04)
+	out(PORTD, ZL)
+	ret
+ENDFUNC ; led_dot
+
+
+FUNCTION(led_onoff)
+	; In: r16 = onoff
+	; Out: none
+	; Changes: SREG
+	cpi(r16, 0)
+	breq(LOC(OFF))
+	sbi(PORTD, 3)
+	ret
+
+  LOC(OFF):
+	cbi(PORTD, 3)
+	ret
+ENDFUNC ; led_onoff
+
+
+;FUNCTION(rounddiv)
+;	; In: r1:r0=dividend, r20=divisor
+;	; Out: r24=quotient
+;	; Changes: r25, r1, r0
+;
+;	; FIXME: overflow checks
+;	; if r1>r20 -> overflow
+;	; if (r1==r20) and (r0!=0) -> overflow
+;
+;	clr(r24)
+;
+;	; add half the divisor to the dividend for rounding instead of lower bound
+;	; FIXME: possible overflow
+;	mov(r25, r20)
+;	lsr(r25)
+;	add(r0, r25)
+;	adc(r1, r24)
+;
+;	ldi(r25, 0x80)
+;  LOC(BITLOOP):
+;  	lsl(r0)
+;	rol(r1)
+;	brcs(LOC(SUBTRACT))
+;	cp(r1, r20)
+;	brlo(LOC(PROCEED))
+;  LOC(SUBTRACT):
+;    sub(r1, r20)
+;	or(r24, r25)
+;  LOC(PROCEED):
+;    lsr(r25)
+;	breq(LOC(DONE))
+;	or(r1, r1)
+;	brne(LOC(BITLOOP))
+;	or(r0, r0)
+;	brne(LOC(BITLOOP))
+;  LOC(DONE):
+;    ret
+;ENDFUNC ; rounddiv
+
+;FUNCTION(wr_serial)
+;	; In: r0=data
+;	; Changes: r1
+;  LOC(WAIT_READY):
+;    lds(r1, UCSR0A)
+;  	sbrs(r1, UDRE0)
+;	rjmp(LOC(WAIT_READY))
+;	sts(UDR0, r0)
+;	ret
+;ENDFUNC ; wr_serial
+
+FUNCTION(set_sample_rate)
+	; In: r16 = idx
+	; Out: none
+	; Changes: SREG, Z, r18, r19, r16
+	;
+	;rcall(led_num)
+	mov(ZL, r16)
+	clr(ZH)
+	addiw(ZL, ZH, adcsra_values << 1)
+	lpm(r18, Z)
+	sts(ADCSRA, r18)
+	
+	add(r16, r16)
+	add(r16, r16)
+
+	mov(ZL, r16)
+	clr(ZH)
+	addiw(ZL, ZH, sample_clks << 1)
+	lpm(r18, Z+)
+	lpm(r19, Z+)
+	sts(OCR1AH, r19)
+	sts(OCR1AL, r18)
+
+	lpm(r18, Z)
+	sts(TCCR1B, r18)
+
+	clr(r18)
+	sts(TCNT1H, r18)
+	sts(TCNT1L, r18)
+	ret
+ENDFUNC ; set_sample_rate
+
+
+FUNCTION(select_vref)
+	; In: r16 = idx: 0=5mv/unit, 1=20mV/unit
+	; Out: none
+	; Changes: r17, r18
+	;
+	tst(r16)
+	breq(LOC(VREF_5mV))
+
+	; VREF_20mV
+	ldi(r18, 0x40) ; ref=AVcc, input=C0, right adjust
+	;ldi(r18, 0x4e) ; VRef=AVcc, input=bandgap
+	lds(r17, factor_20mv)
+	rjmp(LOC(DONE))
+
+  LOC(VREF_5mV):
+	; ref=bandgap 1.1V, input=C0, right adjust
+	ldi(r18, 0xc0)
+	;ldi(r17, 55) ; see comment at vref measurement in @main
+	ldi(r17, 54) ; for this particular chip
+  
+  LOC(DONE):
+	sts(ADMUX, r18)
+	sts(vscale, r17)
+	ret
+ENDFUNC ; select_vref
+
+FUNCTION(recvd_push)
+	; In: r16 = x
+	; Out: None
+	; Changes: Z
+	;
+	lds(ZL, recv_idx)
+	clr(ZH)
+	addiw(ZL, ZH, recv_buf)
+	st(Z, r16)
+
+	lds(ZL, recv_idx)
+	inc(ZL)
+	cpi(ZL, RECV_BUF_SIZE)
+	brlt(LOC(NO_WRAP_AROUND))
+	clr(ZL)
+  LOC(NO_WRAP_AROUND):
+	sts(recv_idx, ZL)
+	ret
+ENDFUNC ; recvd_push
+
+
+FUNCTION(recvd_pop)
+	; In: none
+	; Out: r16 = x
+	; Changes: Z
+	lds(ZL, recv_idx)
+	dec(ZL)
+	brge(LOC(NO_WRAP_AROUND))
+	ldi(ZL, RECV_BUF_SIZE - 1)
+  LOC(NO_WRAP_AROUND):
+	sts(recv_idx, ZL)
+
+	clr(ZH)
+	addiw(ZL, ZH, recv_buf)
+	ld(r16, Z)
+	ret
+ENDFUNC ; recvd_pop
+
+
+FUNCTION(recvd_pop_byte)
+	; In: none
+	; Out: r16 = x
+	; Changes: Z, r17
+	rcall(recvd_pop)
+	mov(r17, r16)
+	rcall(recvd_pop)
+	lsl(r16)
+	lsl(r16)
+	lsl(r16)
+	lsl(r16)
+	or(r16, r17)
+	ret
+ENDFUNC ; recvd_pop_byte
+
+
+FUNCTION(USART_RX_vect)
+	push(r16)
+	in(r16, SREG)
+	push(r16)
+	push(r17)
+	push(ZH)
+	push(ZL)
+
+	lds(r16, UDR0)
+
+	cpi(r16, 'S')
+	breq(LOC(SET_SPEED))
+	cpi(r16, 'R')
+	breq(LOC(SET_VREF))
+	cpi(r16, 'P')
+	breq(LOC(SET_PWM_PRESCALER))
+	cpi(r16, 'T')
+	breq(LOC(SET_PWM_TOTAL))
+	cpi(r16, 'A')
+	breq(LOC(SET_PWM_ACTIVE))
+
+	cpi(r16, '0')
+	brlt(LOC(DONE))
+	cpi(r16, '9' + 1)
+	brge(LOC(NOT_09))
+	subi(r16, '0')
+	rjmp(LOC(DIGIT))
+
+  LOC(NOT_09):
+	cpi(r16, 'A')
+	brlt(LOC(DONE))
+	cpi(r16, 'F' + 1)
+	brge(LOC(NOT_AF))
+	subi(r16, 'A' - 10)
+	rjmp(LOC(DIGIT))
+
+  LOC(NOT_AF):
+	cpi(r16, 'a')
+	brlt(LOC(DONE))
+	cpi(r16, 'f' + 1)
+	brge(LOC(DONE))
+	subi(r16, 'a' - 10)
+
+  LOC(DIGIT):
+	rcall(recvd_push)
+
+  LOC(DONE):
+	pop(ZL)
+	pop(ZH)
+	pop(r17)
+	pop(r16)
+	out(SREG, r16)
+	pop(r16)
+	reti
+
+  LOC(SET_SPEED):
+  	rcall(recvd_pop)
+	andi(r16, 0x07)
+	rcall(set_sample_rate)
+	rjmp(LOC(DONE))
+
+  LOC(SET_VREF):
+  	rcall(recvd_pop)
+	andi(r16, 0x01)
+	rcall(select_vref)
+	rjmp(LOC(DONE))
+
+  LOC(SET_PWM_PRESCALER):
+  	rcall(recvd_pop)
+	andi(r16, 0x07)
+	ori(r16, _BV(WGM22))
+	sts(TCCR2B, r16)
+	rjmp(LOC(DONE))
+
+  LOC(SET_PWM_TOTAL):
+  	rcall(recvd_pop_byte)
+	sts(OCR2A, r16) ; pwm wave length
+	rjmp(LOC(DONE))
+
+  LOC(SET_PWM_ACTIVE):
+  	rcall(recvd_pop_byte)
+	sts(OCR2B, r16) ; pwm wave length
+	rjmp(LOC(DONE))
+ENDFUNC ; USART_RX_vect
+
+
+FUNCTION(ADC_vect)
+	push(r16)
+	in(r16, SREG)
+	push(r0)
+	push(r1)
+	push(r16)
+	push(r17)
+	push(r18)
+
+	lds(r16, ADCL)
+	lds(r17, ADCH)
+
+	; out = high(adc * vscale)
+	lds(r18, vscale)
+	mul(r17, r18)
+	mov(r17, r0)
+	mul(r16, r18)
+	add(r17, r1)
+	sbrc(r0, 7) ; round r17 up if r0 >= 0x80
+	inc(r17)
+    ; value is in r17
+	sts(UDR0, r17)
+
+	pop(r18)
+	pop(r17)
+	pop(r16)
+	pop(r1)
+	pop(r0)
+	out(SREG, r16)
+	pop(r16)
+	reti
+ENDFUNC ; ADC_vect
+; ------------------------------------------------------------------------------
+
+define({BAUDVALUE}, {eval((F_CPU / (8*($1))) - 1)})
+
+FUNCTION(main)
+	sei
+	
+	; Switch off unneeded subsystems
+	ldi(r16, _BV(PRTWI, PRTIM0, PRSPI0))
+	sts(PRR, r16)
+
+	; Wake from sleep uses 4 clks -> leave disabled
+	;clr(r16)
+	;sts(SMCR, r16)
+
+	; B[0..2] are output (lcd)
+	in(r16, DDRB)
+	ori(r16, 0x07)
+	out(DDRB, r16)
+	
+	; D[2,4..7] are output (lcd), D3 is output (pwm)
+	in(r16, DDRD)
+	ori(r16, 0xfc)
+	out(DDRD, r16)
+	
+	; Usart to USE_BAUD, 8 data, even pty, 1 stop, rx data irq
+	ldi(r16, HI8(USE_BAUD))
+	sts(UBRR0H, r16)
+	ldi(r16, LO8(USE_BAUD))
+	sts(UBRR0L, r16)
+	ldi(r16, _BV(U2X0))
+	sts(UCSR0A, r16)
+	ldi(r16, _BV(RXEN0, TXEN0, RXCIE0))
+	sts(UCSR0B, r16)
+	ldi(r16, _BV(UCSZ01, UCSZ00, UPM01)) ; 8bits, even pty, 1 stop
+	sts(UCSR0C, r16)
+
+	; C0 is input (adc)
+	in(r16, DDRC)
+	andi(r16, ~_BV(0))
+	out(DDRC, r16)
+	; C[0] is analogue input (adc)
+	ldi(r16,  _BV(0))
+	sts(DIDR0, r16)
+
+	; NOTE: Vref=1.1V is BULLSHIT, it varies from chip to chip between 1.0 and 1.2!
+	; For this particular chip Vref=1.078, that is a 2% error.
+
+	; We support two voltage resolutions:
+	;
+	; 0., Unit=5mV, range= 0x00=0 .. 0x100=1280mV
+	; Does NOT use the whole range, it is limited to 0xdc=1100mV.
+	; VRef for the ADC is bandgap voltage 1.1V
+	;
+	; 1024 iu = 1100mV -> U[mV] = Input * 1100/1024 = Input * 275/256
+	; 1 ou = 5mV -> Output = U[mV] / 5mV = Input * 55/256
+	;
+	; If we transmit the high byte of a word, then we need to calculate 256*Output,
+	; and thus avoid fractional numbers:
+	; Xmit = high(256*Output) = high(Input * 55)
+	; (That's why the 'vscale = 55' in @select_vref)
+	;
+	; Factor = (1100/1024)/5 * 256 = 1100/(4*5) = 55
+	; FIXME: For this particular chip it's 1078/(4*5) = 54
+	;
+	;
+	; 1., Unit=20mV, range= 0x00=0 .. 0xff=5120mV
+	; Does NOT use the whole range, it is limited to approx. 0xf0=5000mV=Vcc
+	; VRef for the ADC is AVcc, whatever it is precisely, so we'll have to
+	; do some pre-measurements.
+	;
+	; 1024 iu = Vcc -> U[mV] = Input * Vcc[mV] / 1024
+	; 1 ou = 20 mV -> Output = U[mV] / 20mV = Input * Vcc[mV] / (20*1024) 
+    ;
+	; We transmit the high byte, so
+	; Xmit = high(256*Output) = high(Input * Vcc[mV] / 80)
+	; So we must calculate Vcc[mV]/80 as the multiplier factor.
+	;
+	; The only fixed voltage we have is the 1.1V bandgap reference, so we'll
+	; measure that and Vcc against one another. As Vcc > 1.1V, Vcc will
+	; be the reference and the 1.1V will be the input.
+	;
+	; The input values are around 1024 * 1100mV/5000mV = 225, so they
+	; fit in one byte (as long as Vcc > 4.4V, which we may assume).
+	;
+	; Input = 1024 * 1100mV / Vcc[mV] -> Vcc[mV] = 1024*1100/Input
+	; Factor = Vcc[mV]/80 = (1024*1100/80)/Input = 14080 / Input = approx. 62
+	;
+	; We don't have instruction for division, but 62 is tolerable for a
+	; subtract-while-greater counter loop, and performing the measurement
+	; again for each loop will have a smoothing effect on the Vcc noise as well.
+	;
+	; FIXME: for this particular chip, Vref = 1078mV, so 1024*1078/80 = 13798
+	;
+	; As of the chip Vref dependency, we saw that it affected the following values:
+	; - the constant 55 (now 54) in `select_vref`
+	; - the high and low byte of 14080 (now 13798) below
+	; These 3 bytes should be stored in eeprom as calibration data, but at this point
+	; I just compile them in the code, and implement this only when needed.
+
+	ldi(r16, 0x4e) ; VRef=AVcc, input=bandgap
+	sts(ADMUX, r16)
+	; enable adc, prescaler=1:128
+	ldi(r16, eval(_BV(ADEN) + 0x07))
+	sts(ADCSRA, r16)
+
+	;ldi(r18, eval(14080 >> 8))
+	;ldi(r17, eval(14080 & 0xff))
+	ldi(r18, eval(13798 >> 8))		; FIXME: adjusted for this particular chip
+	ldi(r17, eval(13798 & 0xff))
+	clr(r0) ; the factor counter
+	
+  LOC(MEASURE_ADC):
+  	inc(r0)
+	lds(r16, ADCSRA)
+	ori(r16, _BV(ADSC))
+	sts(ADCSRA, r16)
+  LOC(WAIT_ADC_RESULT):
+	lds(r16, ADCSRA)
+	sbrc(r16, ADSC)
+	rjmp(LOC(WAIT_ADC_RESULT))
+
+	lds(r16, ADCL)
+	sub(r17, r16)
+	lds(r16, ADCH)
+	sbc(r18, r16)
+	brpl(LOC(MEASURE_ADC))
+	sts(factor_20mv, r0)
+
+
+	; Set up Timer2 for FastPWM mode
+	ldi(r16, _BV(COM2B1, WGM21, WGM20))
+	sts(TCCR2A, r16)
+	ldi(r16, _BV(WGM22) | 7) ; FIXME: prescaler is set to 7 -> 8kHz..64Hz
+	sts(TCCR2B, r16)
+	ldi(r16, 0x30)
+	sts(OCR2A, r16) ; pwm wave length
+	ldi(r16, 0x20)
+	sts(OCR2B, r16) ; pwm high state length, must be < wave length
+
+	;clr(r16)
+	;sts(TIMSK2, r16)
+
+	; Set up Timer1 for normal operation and run
+	ldi(r16, 5) ; Auto trigger on TC1 CMatch B
+	sts(ADCSRB, r16)
+
+	ldi(r16, 1) ; 20 mV per unit
+	rcall(select_vref)
+
+	ldi(r16, 7) ; 500Hz = 2ms per sample
+	rcall(set_sample_rate)
+
+	clr(r16)
+	sts(OCR1BH, r16)
+	sts(OCR1BL, r16)
+
+	ldi(r18, _BV(OCIE1B))
+	sts(TIMSK1, r18)
+
+ LOC(nirvana):
+	rjmp(LOC(nirvana))
+ENDFUNC ; main
+
+
+
+; ------------------------------------------------------------------------------
+.CSEG
+
+led_b210:	.DB 3, 0, 5, 5, 6, 7, 7, 0, 7, 7, 6, 7, 3, 5, 7, 6
+led_d7654:	.DB 0xf0, 0x30, 0xe0, 0x70, 0x30, 0x50, 0xd0, 0x70, 0xf0, 0x70, 0xf0, 0x90, 0xc0, 0xb0, 0xc0, 0xc0
+
+
+; ------------------------------------------------------------------------------
+.DSEG
+factor_20mv:		.byte 1
+recv_idx:			.byte 1*1
+vscale:				.byte 1
+recv_buf:			.byte 1*RECV_BUF_SIZE
+
+; ------------------------------------------------------------------------------
+.CSEG
+
+define({CLK_PARAM_HZ}, {ifelse(
+	eval((F_CPU /		 $1 ) < 65536), 1,
+		.DW eval(F_CPU / $1)
+		.DW eval(_BV(WGM12) + 1),
+	eval((F_CPU / (  8 * $1)) < 65536), 1,
+		.DW eval(F_CPU / (8 * $1))
+		.DW eval(_BV(WGM12) + 2),
+	eval((F_CPU / ( 64 * $1)) < 65536), 1,
+		.DW eval(F_CPU / (64 * $1))
+		.DW eval(_BV(WGM12) + 3),
+	eval((F_CPU / (256 * $1)) < 65536), 1,
+		.DW eval(F_CPU / (256 * $1))
+		.DW eval(_BV(WGM12) + 4),
+
+		.DW eval(F_CPU / (1024 * $1))
+		.DW eval(_BV(WGM12) + 5)
+	)})
+
+
+sample_clks:
+		; [0]: 10 us = 100 kHz
+		CLK_PARAM_HZ(100000)
+		; [1]: 20 us = 50 kHz
+		CLK_PARAM_HZ(50000)
+		; [2]: 50 us = 20 kHz
+		CLK_PARAM_HZ(20000)
+		; [3]: 100 us = 10 kHz
+		CLK_PARAM_HZ(10000)
+		; [4]: 200 us = 5 kHz
+		CLK_PARAM_HZ(5000)
+		; [5]: 500 us = 2 kHz
+		CLK_PARAM_HZ(2000)
+		; [6]: 1 ms = 1 kHz
+		CLK_PARAM_HZ(1000)
+		; [7]: 2 ms = 500 Hz
+		CLK_PARAM_HZ(500)
+
+
+define({ADCSRA_VALUE}, {eval(_BV(ADEN, ADATE, ADIE) + MAX(1,MSB8(F_CPU/($1*13)))) })
+
+adcsra_values:
+		.DB ADCSRA_VALUE(100000), ADCSRA_VALUE(50000), ADCSRA_VALUE(20000), ADCSRA_VALUE(10000), ADCSRA_VALUE(5000), ADCSRA_VALUE(2000), ADCSRA_VALUE(1000), ADCSRA_VALUE(500)
+
+;{ vim: set sw=4 ts=4 ft=asm noet: }
