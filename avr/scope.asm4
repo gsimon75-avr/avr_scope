@@ -5,7 +5,7 @@ include(boilerplate.m4)
 include(iosyms.m4)
 
 define({RECV_BUF_SIZE}, 4)
-define({NUM_SAMPLES}, 512)
+define({NUM_SAMPLES}, 800)
 define({USE_BAUD}, BAUDVALUE(250000))
 define({TRIG_HIST}, 4)
 define({TRIG_NONE}, 0)
@@ -13,15 +13,15 @@ define({TRIG_RISING}, 1)
 define({TRIG_FALLING}, 2)
 
 ; register mapping
-define({cmd_start_adc}, r9)
 define({trig_level}, r11)
 define({usart_sreg_tmp}, r12)
 define({adc_sreg_tmp}, r14)
 ; generic working registers: r16, r17
+define({delay_counter_max}, r23)
+define({cmd_start_adc}, r24)
 define({trig_type}, r25)
 ; sample_ptr X[H,L] address of the next sample: r26, r27
 ; recv_ptr Y[H,L], used by recvd_push and recvd_pop: r28, r29
-; pointer to the appropriate delay code block Z[H,L]: r30, r31
 
 define({BAUDVALUE}, {eval((F_CPU / (8*($1))) - 1)})
 
@@ -231,6 +231,43 @@ FUNCTION(recvd_pop_byte)
     ret()
 ENDFUNC ; recvd_pop_byte
 
+FUNCTION(set_sample_rate)
+    ; In: r16
+    ; Delay = 16 + 8*N clks -> N = delay/8 - 2
+    ; 0:   1 us =   16 clks, N =   0
+    ; 1:   2 us =   32 clks, N =   2
+    ; 2:   5 us =   80 clks, N =   8
+    ; 3:  10 us =  160 clks, N =  18
+    ; 4:  20 us =  320 clks, N =  38
+    ; 5:  50 us =  800 clks, N =  98
+    ; 6: 100 us = 1600 clks, N = 198
+    ldi(cmd_start_adc, _BV(ADEN, ADSC) | 2)
+    ldi(delay_counter_max, 0)
+    tst(r16)
+    breq(LOC(DONE))
+    ldi(delay_counter_max, 2)
+    dec(r16)
+    breq(LOC(DONE))
+    ldi(cmd_start_adc, _BV(ADEN, ADSC) | 3)
+    ldi(delay_counter_max, 8)
+    dec(r16)
+    breq(LOC(DONE))
+    ldi(delay_counter_max, 18)
+    dec(r16)
+    breq(LOC(DONE))
+    ldi(delay_counter_max, 38)
+    dec(r16)
+    breq(LOC(DONE))
+    ldi(delay_counter_max, 98)
+    dec(r16)
+    breq(LOC(DONE))
+    ldi(delay_counter_max, 198)
+  LOC(DONE):
+    mov(r16, delay_counter_max)
+    andi(r16, 0x0f)
+    rcall(led_num)
+    ret()
+ENDFUNC ; set_sample_rate
 
 FUNCTION(USART_RX_vect)
     in(usart_sreg_tmp, SREG)
@@ -252,7 +289,7 @@ FUNCTION(USART_RX_vect)
     breq(LOC(SET_PWM_PRESCALER))
     cpi(r16, 't')
     breq(LOC(SET_PWM_TOTAL))
-    cpi(r16, 'a')
+    cpi(r16, 'h')
     breq(LOC(SET_PWM_ACTIVE))
 
     cpi(r16, '0')
@@ -279,17 +316,11 @@ FUNCTION(USART_RX_vect)
 
   LOC(DIGIT):
     rcall(recvd_push)
-
-  LOC(DONE):
-    pop(r17)
-    pop(r16)
-    out(SREG, usart_sreg_tmp)
-    reti()
+    rjmp(LOC(DONE))
 
   LOC(SET_SPEED):
     rcall(recvd_pop)
-    andi(r16, 0x03)
-    ; FIXME: rcall(set_sample_rate)
+    rcall(set_sample_rate)
     rjmp(LOC(DONE))
 
   LOC(SET_VREF):
@@ -328,6 +359,12 @@ FUNCTION(USART_RX_vect)
     rcall(recvd_pop_byte)
     sts(OCR2B, r16) ; pwm wave length
     rjmp(LOC(DONE))
+
+  LOC(DONE):
+    pop(r17)
+    pop(r16)
+    out(SREG, usart_sreg_tmp)
+    reti()
 ENDFUNC ; USART_RX_vect
 
 FUNCTION(USART_UDRE_vect)
@@ -408,18 +445,19 @@ FUNCTION(main)
     ; Set up Timer2 for FastPWM mode
     ldi(r16, _BV(COM2B1, WGM21, WGM20))
     sts(TCCR2A, r16)
-    ldi(r16, _BV(WGM22) | 6) ; FIXME: prescaler hardwired
+    ldi(r16, _BV(WGM22) | 3) ; FIXME: prescaler hardwired to 16M/32 = 500kHz
     sts(TCCR2B, r16)
-    ldi(r16, 0x30)
-    sts(OCR2A, r16) ; pwm wave length
-    ldi(r16, 0x20)
-    sts(OCR2B, r16) ; pwm high state length, must be < wave length
+    ldi(r16, 250 - 1)
+    sts(OCR2A, r16) ; pwm wave length, freq = 500kHz / 250 = 2 kHz
+    ldi(r16, 100) 
+    sts(OCR2B, r16) ; pwm high state length, must be < wave length, now: 100/250 = 40%
 
     ; Set up ADC
     ldi(r16, _BV(ADLAR, REFS0)) ; 20 mV per unit
     sts(ADMUX, r16)
-    ldi(r16, _BV(ADEN, ADSC) | 3) ; FIXME: prescaler now hardwired
-    mov(cmd_start_adc, r16)
+    ; Set up delay block address
+    ldi(r16, 0)
+    rcall(set_sample_rate)
 
     ; Set up USART recv buffer pointer
     ldi(YL, recv_buf & 0x0f)
@@ -436,105 +474,90 @@ FUNCTION(main)
     ldi(r16, _BV(RXEN0, TXEN0, RXCIE0, UDRIE0))
     sts(UCSR0B, r16) ; Enable USART
 
-    ; Set up delay block address
-    ldi(ZH, LOC(delay_100us) >> 8)
-    ldi(ZL, LOC(delay_100us) & 0xff)
-
     ; Set up sample buffer pointer
     ldi(XL, samples & 0x0f)
     ldi(XH, samples >> 8)
 
     ; Set up trigger
-    ldi(trig_type, TRIG_NONE)
+    ldi(trig_type, TRIG_RISING)
     ldi(r16, 0x80)
     mov(trig_level, r16)
 
+    ; ------------------------------------------------------------------------------
+
     ; Read the next sweep of samples
-    ; NOTE: The loop without the delay code is 10 clks,
-    ; the rest shall be added explicitely
- LOC(NEXT_SAMPLE):
-    lds(r16, ADCH) ; 1 clk
-    sts(ADCSRA, cmd_start_adc) ; 1 clk
-    st(X+, r16) ; 1 clk
-    ijmp() ; 2 clks ; to the appropriate delay block
+    ;
+    ; The point here is to create a delay loop with a constant and a repeatable part
+    ; whose sum is a divisor of 16 clks and can express 1600 at top.
+    ; I don't want to unroll 1600 `nop`s, at least not until all more civil approaches
+    ; have been exhausted, so it'll be a loop with a counter.
+    ;
+    ; The constant part has to do the actual work (read and store the ADC value,
+    ; increment the dest pointer and check for end-of-sweep), so it's at least
+    ; 2+2+2+1 + 1+1+(2+2 | 1+1+2) = 13 clks, so when expressing 16, we have two approaches:
+    ;
+    ; 1. The loop runs once, and the repeating part can be at most 3 clks, which is ok for a `dec; brnz`
+    ; 2. The loop runs 0 times, the constant part takes up 16, but this requires a forward-testing loop
+    ;
+    ; As of approach #1, if the constant part is 13 and the repeatable 3, it's fine for 16, but
+    ; even for 32 the loop should run (32-13)/3 = 6 1/3 times, so this option is out.
+    ;
+    ; Approach #2 is it then, so the constant part is 16, the loop must be a forward-testing
+    ; one, the repeatable length must divide 16 clks, and must be at least (1600-16)/255 <= 7
+    ; clks long. (At least if I want the counter keep within 8 bits, which I'd prefer to.)
+    ;
+    ; So the repeatable part is either 8 or 16 clks. Even for a forward-test and jump-back 8
+    ; seems fairly enough, so this is the time for some constructive laziness. No point in
+    ; optimising a delay loop, remember ;) ?
 
-  LOC(GO_NEXT_SAMPLE): ; NOTE: adds 2 clks before jumpint to NEXT_SAMPLE
+    ; The loop with the delay code is 2+2+2+(3)+1 + (1+1+1+1+1+1+2)*N + 1+1+(2+2 | 1+1+2) = 16 + 8*N clks
+    ; That makes N = clks/8 - 2
+    ;
+    ; 100 us = 1600 clks, N = 198
+    ;  50 us =  800 clks, N =  98
+    ;  20 us =  320 clks, N =  38
+    ;  10 us =  160 clks, N =  18
+    ;   5 us =   80 clks, N =   8
+    ;   2 us =   32 clks, N =   2
+    ;   1 us =   16 clks, N =   0
+    
+  LOC(NEXT_SAMPLE_PLUS_2): ; NOTE: we need to equalise the cases when the 1st and when the 2nd `cpi` decides to jump back
     rjmp(LOC(NEXT_SAMPLE)) ; 2 clks
+  LOC(NEXT_SAMPLE):
+    lds(r16, ADCH) ; 2 clk
+    sts(ADCSRA, cmd_start_adc) ; 2 clk
+    st(X+, r16) ; 2 clk
 
-  LOC(delay_100us): ; 100 us = 1600 clks, 1590 to go
-    ; Wait some amount: 1 + 227*(2+2+1+2) = 1 + 227*7 = 1590
-    ldi(r16, 227); 1 clk
-  LOC(wait100_loop):
-    rjmp(LOC(wait100_loop_1)) ; 2 clks
-  LOC(wait100_loop_1):
-    rjmp(LOC(wait100_loop_2)) ; 2 clks
-  LOC(wait100_loop_2):
+    nop() ; 1 clk
+
+    mov(r16, delay_counter_max) ; 1 clk
+    ; wait starts
+  LOC(WAIT_LOOP):
+    tst(r16); 1 clk
+    breq(LOC(WAIT_DONE)) ; calculate as 1 clk, add the 2nd (if jump taken) later
     dec(r16) ; 1 clk
-    brne(LOC(wait100_loop)); 2 clks
-    nop()
+    nop() ; 1 clk
+    nop() ; 1 clk
+    nop() ; 1 clk
+    rjmp(LOC(WAIT_LOOP)) ; 2 clks
+  LOC(WAIT_DONE):
     ; wait done
+
+    ; +1 clk, because the `breq` above takes 2 when it actually jumps here
     cpi(XH, (samples + NUM_SAMPLES) >> 8) ; 1 clk
-    brne(LOC(GO_NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
+    brne(LOC(NEXT_SAMPLE_PLUS_2)) ; 2 clks if branch taken, 1 clk if staying here
     cpi(XL, (samples + NUM_SAMPLES) & 0xff) ; 1 clk
     brne(LOC(NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
-    rjmp(LOC(SEND_SAMPLES))
 
-  LOC(delay_50us): ; 50 us = 800 clks, 790 to go
-    ; Wait some amount: 1 + 2 + 197*(1+1+2) - 1 = 3 + 197*4 - 1 = 790
-    ldi(r16, 197) ; 1 clk
-    rjmp(LOC(wait50_pre)) ; 2 clks
-  LOC(wait50_pre):
-    rjmp(LOC(wait50_loop)) ; 2 clks
-  LOC(wait50_loop):
-    nop(); 1 clk
-    dec(r16) ; 1 clk
-    brne(LOC(wait50_loop)); 2 clks
-    ; nop ; -1 clk, because it's already calculated in the '2 clks' above
-    ; wait done
-    cpi(XH, (samples + NUM_SAMPLES) >> 8) ; 1 clk
-    brne(LOC(GO_NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
-    cpi(XL, (samples + NUM_SAMPLES) & 0xff) ; 1 clk
-    brne(LOC(NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
-    rjmp(LOC(SEND_SAMPLES))
 
-  LOC(delay_20us): ; 20 us = 320 clks, 310 to go
-    ; Wait some amount: 1 + 103*(1+2) = 1 + 103*3 = 310
-    ldi(r16, 103); 1 clk
-  LOC(wait20_loop):
-    dec(r16) ; 1 clk
-    brne(LOC(wait20_loop)); 2 clks
-    nop()
-    ; wait done
-    cpi(XH, (samples + NUM_SAMPLES) >> 8) ; 1 clk
-    brne(LOC(GO_NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
-    cpi(XL, (samples + NUM_SAMPLES) & 0xff) ; 1 clk
-    brne(LOC(NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
-    rjmp(LOC(SEND_SAMPLES))
-
-  LOC(delay_10us): ; 10 us = 160 clks, 150 to go
-    ; Wait some amount: 1 + 50*(1+2) - 1 = 150
-    ldi(r16, 50) ; 1 clk
-  LOC(wait10_loop):
-    dec(r16) ; 1 clk
-    brne(LOC(wait10_loop)); 2 clks
-    ; nop ; -1 clk, because it's already calculated in the '2 clks' above
-    ; wait done
-    cpi(XH, (samples + NUM_SAMPLES) >> 8) ; 1 clk
-    brne(LOC(GO_NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
-    cpi(XL, (samples + NUM_SAMPLES) & 0xff) ; 1 clk
-    brne(LOC(NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
-    rjmp(LOC(SEND_SAMPLES))
-
-  ; ----
-
-  LOC(SEND_SAMPLES):
-    ; Send them to the USART
+    ; Send the samples to the USART
     ldi(XL, samples & 0x0f)
     ldi(XH, samples >> 8)
     clt()
     rcall(USART_UDRE_vect) ; will enable interrupts on return
     
   LOC(WAIT_SEND_COMPLETE):
+    ; USART_UDRE_vect will set T flag when finished
     brtc(LOC(WAIT_SEND_COMPLETE))
 
     cpi(trig_type, TRIG_RISING)

@@ -41,27 +41,27 @@ format_with_suffix(char *buf, int bufsize, float x) {
     if (x < 1e-12)
         snprintf(buf, bufsize, "0");
     else if (x < 1e-9)
-        snprintf(buf, bufsize, "%dp", (int)(x * 1e12 + 0.5));
+        snprintf(buf, bufsize, "%.1fp", x * 1e12);
     else if (x < 1e-6)
-        snprintf(buf, bufsize, "%dn", (int)(x * 1e9 + 0.5));
+        snprintf(buf, bufsize, "%.1fn", x * 1e9);
     else if (x < 1e-3)
-        snprintf(buf, bufsize, "%du", (int)(x * 1e6 + 0.5));
+        snprintf(buf, bufsize, "%.1fu", x * 1e6);
     else if (x < 1)
-        snprintf(buf, bufsize, "%dm", (int)(x * 1e3 + 0.5));
+        snprintf(buf, bufsize, "%.1fm", x * 1e3);
     else if (x < 10)
         snprintf(buf, bufsize, "%4.2f", x);
     else if (x < 100)
         snprintf(buf, bufsize, "%4.1f", x);
     else if (x < 10000)
-        snprintf(buf, bufsize, "%d", (int)(x + 0.5));
+        snprintf(buf, bufsize, "%.1f", x);
     else if (x < 1e6)
-        snprintf(buf, bufsize, "%dk", (int)(x * 1e-3 + 0.5));
+        snprintf(buf, bufsize, "%.1fk", x * 1e-3);
     else if (x < 1e9)
-        snprintf(buf, bufsize, "%dM", (int)(x * 1e-6 + 0.5));
+        snprintf(buf, bufsize, "%.1fM", x * 1e-6);
     else if (x < 1e12)
-        snprintf(buf, bufsize, "%dG", (int)(x * 1e-9 + 0.5));
+        snprintf(buf, bufsize, "%.1fG", x * 1e-9);
     else if (x < 1e15)
-        snprintf(buf, bufsize, "%dT", (int)(x * 1e-12 + 0.5));
+        snprintf(buf, bufsize, "%.1fT", x * 1e-12);
     else
         snprintf(buf, bufsize, "inf");
 }

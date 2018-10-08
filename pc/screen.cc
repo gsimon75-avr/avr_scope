@@ -23,7 +23,8 @@
 
 SDL_Thread *thr_serial;
 int fd_serial = -1;
-const char init_cmd[] = "1R3S80L0T";
+//const char init_cmd[] = "1R6S80L0T4p0ch31t";
+const char init_cmd[] = "1R6S80L0T";
 
 static uint16_t voltage_factor;
 
@@ -200,7 +201,8 @@ init_screen(const char *devname) {
 void
 set_sample_rate(uint8_t n) {
     char buf[32];
-    snprintf(buf, sizeof(buf), "%XS", n & 3);
+    printf("sample_rate=%d\n", n);
+    snprintf(buf, sizeof(buf), "%XS", n);
     usleep(1000); write(fd_serial, buf + 0, 1);
     usleep(1000); write(fd_serial, buf + 1, 1);
 }
@@ -208,6 +210,7 @@ set_sample_rate(uint8_t n) {
 void
 set_voltage_ref(uint8_t n) {
     char buf[32];
+    printf("voltage_ref=%d\n", n);
     snprintf(buf, sizeof(buf), "%XR", n & 3);
     usleep(1000); write(fd_serial, buf + 0, 1);
     usleep(1000); write(fd_serial, buf + 1, 1);
@@ -217,6 +220,7 @@ set_voltage_ref(uint8_t n) {
 void
 set_trig_level(uint8_t n) {
     char buf[32];
+    printf("trig_level=0x%02x\n", n);
     snprintf(buf, sizeof(buf), "%02XL", n);
     usleep(1000); write(fd_serial, buf + 0, 1);
     usleep(1000); write(fd_serial, buf + 1, 1);
@@ -226,6 +230,7 @@ set_trig_level(uint8_t n) {
 void
 set_trig_type(trig_type_t type) {
     char buf[32];
+    printf("trig_type=%d\n", type);
     snprintf(buf, sizeof(buf), "%XT", type & 3);
     usleep(1000); write(fd_serial, buf + 0, 1);
     usleep(1000); write(fd_serial, buf + 1, 1);
