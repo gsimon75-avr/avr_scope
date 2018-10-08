@@ -188,7 +188,7 @@ FUNCTION(recvd_push)
     brlo(LOC(NO_WRAP_AROUND))
     cpi(YL, (recv_buf + RECV_BUF_SIZE) & 0xff)
     brlo(LOC(NO_WRAP_AROUND))
-    ldi(YL, recv_buf & 0x0f)
+    ldi(YL, recv_buf & 0xff)
     ldi(YH, recv_buf >> 8)
   LOC(NO_WRAP_AROUND):
     st(Y+, r16)
@@ -209,7 +209,7 @@ FUNCTION(recvd_pop)
     cpi(YL, recv_buf & 0xff)
     brsh(LOC(NO_WRAP_AROUND))
   LOC(WRAP_AROUND):
-    ldi(YL, (recv_buf + RECV_BUF_SIZE) & 0x0f)
+    ldi(YL, (recv_buf + RECV_BUF_SIZE) & 0xff)
     ldi(YH, (recv_buf + RECV_BUF_SIZE) >> 8)
   LOC(NO_WRAP_AROUND):
     ret()
@@ -368,6 +368,7 @@ FUNCTION(USART_RX_vect)
 ENDFUNC ; USART_RX_vect
 
 FUNCTION(USART_UDRE_vect)
+    brts(LOC(DONE))
     in(usart_sreg_tmp, SREG)
     cpi(XH, (samples + NUM_SAMPLES) >> 8)
     brlo(LOC(NEXT_SAMPLE))
@@ -376,6 +377,7 @@ FUNCTION(USART_UDRE_vect)
     brlo(LOC(NEXT_SAMPLE))
     out(SREG, usart_sreg_tmp)
     set()
+  LOC(DONE):
     reti()
 
   LOC(LAST_SAMPLE):
@@ -460,7 +462,7 @@ FUNCTION(main)
     rcall(set_sample_rate)
 
     ; Set up USART recv buffer pointer
-    ldi(YL, recv_buf & 0x0f)
+    ldi(YL, recv_buf & 0xff)
     ldi(YH, recv_buf >> 8)
     ; Usart to USE_BAUD, 8 data, even pty, 1 stop, rx data irq
     ldi(r16, HI8(USE_BAUD))
@@ -475,7 +477,7 @@ FUNCTION(main)
     sts(UCSR0B, r16) ; Enable USART
 
     ; Set up sample buffer pointer
-    ldi(XL, samples & 0x0f)
+    ldi(XL, samples & 0xff)
     ldi(XH, samples >> 8)
 
     ; Set up trigger
@@ -551,7 +553,7 @@ FUNCTION(main)
 
 
     ; Send the samples to the USART
-    ldi(XL, samples & 0x0f)
+    ldi(XL, samples & 0xff)
     ldi(XH, samples >> 8)
     clt()
     rcall(USART_UDRE_vect) ; will enable interrupts on return
@@ -560,14 +562,15 @@ FUNCTION(main)
     ; USART_UDRE_vect will set T flag when finished
     brtc(LOC(WAIT_SEND_COMPLETE))
 
+    ; Set up sample buffer pointer
+    ldi(XL, samples & 0x0f)
+    ldi(XH, samples >> 8)
+
     cpi(trig_type, TRIG_RISING)
     breq(LOC(WAIT_TRIG_RISING))
     cpi(trig_type, TRIG_FALLING)
     breq(LOC(WAIT_TRIG_FALLING))
   LOC(TRIGGERED):
-    ; Set up sample buffer pointer
-    ldi(XL, samples & 0x0f)
-    ldi(XH, samples >> 8)
     cli()
     rjmp(LOC(NEXT_SAMPLE))
 
