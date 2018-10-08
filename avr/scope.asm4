@@ -579,7 +579,13 @@ FUNCTION(main)
     cp(r16, trig_high)
     brlo(LOC(WAIT_TRIG_FALLING))
   LOC(WAIT_TRIG_FALLING_2): ; wait for trig condition
-    rcall(read_adc)
+    ; rcall(read_adc) ; inlined below to reclaim 3+4 clks of `rcall + ret`
+    sts(ADCSRA, cmd_start_adc)
+  LOC(WAIT_COMPLETE_F):
+    lds(r16, ADCSRA)
+    andi(r16, _BV(ADSC))
+    brne(LOC(WAIT_COMPLETE_F))
+    lds(r16, ADCH)
     cp(r16, trig_low)
     brlo(LOC(NEXT_SAMPLE))
     rjmp(LOC(WAIT_TRIG_FALLING_2))
@@ -589,7 +595,13 @@ FUNCTION(main)
     cp(r16, trig_low)
     brsh(LOC(WAIT_TRIG_RISING))
   LOC(WAIT_TRIG_RISING_2): ; wait for trig condition
-    rcall(read_adc)
+    ;rcall(read_adc) ; inlined below to reclaim 3+4 clks of `rcall + ret`
+    sts(ADCSRA, cmd_start_adc)
+  LOC(WAIT_COMPLETE_R):
+    lds(r16, ADCSRA)
+    andi(r16, _BV(ADSC))
+    brne(LOC(WAIT_COMPLETE_R))
+    lds(r16, ADCH)
     cp(r16, trig_high)
     brsh(LOC(NEXT_SAMPLE))
     jmp(LOC(WAIT_TRIG_RISING_2))

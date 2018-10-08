@@ -27,6 +27,7 @@ foreach({op}, (
 {tst}, {wdr}, {xch}), {define(op, {{$0} $@})})
 
 dnl custom pseudo-instructions
+dnl NOTE: CF is set in reverse!!!
 define({addi}, {subi $1, -($2)})
 define({addiw}, {subi $1, low(-($3)) 
 	sbci $2, high(-($3))})
