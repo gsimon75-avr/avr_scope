@@ -13,6 +13,8 @@ define({TRIG_RISING}, 1)
 define({TRIG_FALLING}, 2)
 
 ; register mapping
+define({trig_low}, r9)
+define({trig_high}, r10)
 define({trig_level}, r11)
 define({usart_sreg_tmp}, r12)
 define({adc_sreg_tmp}, r14)
@@ -341,6 +343,17 @@ FUNCTION(USART_RX_vect)
   LOC(SET_TRIG_LEVEL):
     rcall(recvd_pop_byte)
     mov(trig_level, r16)
+    mov(r17, r16)
+    addi(r16, TRIG_HIST)
+    brcs(LOC(TRIG_LEVEL_NOT_TOO_HIGH))
+    ldi(r16, 0xff - TRIG_HIST)
+  LOC(TRIG_LEVEL_NOT_TOO_HIGH):
+    mov(trig_high, r16)
+    subi(r17, TRIG_HIST)
+    brcc(LOC(TRIG_LEVEL_NOT_TOO_LOW))
+    ldi(r17, TRIG_HIST)
+  LOC(TRIG_LEVEL_NOT_TOO_LOW):
+    mov(trig_low, r17)
     rjmp(LOC(DONE))
 
   LOC(SET_PWM_PRESCALER):
@@ -405,16 +418,6 @@ FUNCTION(read_adc)
     andi(r16, _BV(ADSC))
     brne(LOC(WAIT_COMPLETE))
     lds(r16, ADCH)
-    ; limit to [TRIG_HIST, 0xff - TRIG_HIST]
-    cpi(r16, TRIG_HIST)
-    brsh(LOC(HIGH_ENOUGH))
-    ldi(r16, TRIG_HIST)
-    rjmp(LOC(DONE))
-  LOC(HIGH_ENOUGH):
-    cpi(r16, 0xff - TRIG_HIST)
-    brlo(LOC(DONE))
-    ldi(r16, 0xff - TRIG_HIST)
-  LOC(DONE):
     ret
 ENDFUNC ; read_adc
 
@@ -526,11 +529,11 @@ FUNCTION(main)
   LOC(NEXT_SAMPLE_PLUS_2): ; NOTE: we need to equalise the cases when the 1st and when the 2nd `cpi` decides to jump back
     rjmp(LOC(NEXT_SAMPLE)) ; 2 clks
   LOC(NEXT_SAMPLE):
+    cli() ; 1 clk
     lds(r16, ADCH) ; 2 clk
     sts(ADCSRA, cmd_start_adc) ; 2 clk
     st(X+, r16) ; 2 clk
 
-    nop() ; 1 clk
 
     mov(r16, delay_counter_max) ; 1 clk
     ; wait starts
@@ -569,34 +572,27 @@ FUNCTION(main)
     cpi(trig_type, TRIG_RISING)
     breq(LOC(WAIT_TRIG_RISING))
     cpi(trig_type, TRIG_FALLING)
-    breq(LOC(WAIT_TRIG_FALLING))
-  LOC(TRIGGERED):
-    cli()
-    rjmp(LOC(NEXT_SAMPLE))
-
-  LOC(WAIT_TRIG_RISING): ; wait for trig pre-condition
-    rcall(read_adc)
-    addi(r16, TRIG_HIST)
-    cp(r16, trig_level)
-    brsh(LOC(WAIT_TRIG_RISING))
-  LOC(WAIT_TRIG_RISING_2): ; wait for trig condition
-    rcall(read_adc)
-    subi(r16, TRIG_HIST)
-    cp(r16, trig_level)
-    brlo(LOC(WAIT_TRIG_RISING_2))
-    rjmp(LOC(TRIGGERED))
+    brne(LOC(NEXT_SAMPLE))
 
   LOC(WAIT_TRIG_FALLING): ; wait for trig pre-condition
     rcall(read_adc)
-    subi(r16, TRIG_HIST)
-    cp(r16, trig_level)
+    cp(r16, trig_high)
     brlo(LOC(WAIT_TRIG_FALLING))
   LOC(WAIT_TRIG_FALLING_2): ; wait for trig condition
     rcall(read_adc)
-    addi(r16, TRIG_HIST)
-    cp(r16, trig_level)
-    brsh(LOC(WAIT_TRIG_FALLING_2))
-    rjmp(LOC(TRIGGERED))
+    cp(r16, trig_low)
+    brlo(LOC(NEXT_SAMPLE))
+    rjmp(LOC(WAIT_TRIG_FALLING_2))
+
+  LOC(WAIT_TRIG_RISING): ; wait for trig pre-condition
+    rcall(read_adc)
+    cp(r16, trig_low)
+    brsh(LOC(WAIT_TRIG_RISING))
+  LOC(WAIT_TRIG_RISING_2): ; wait for trig condition
+    rcall(read_adc)
+    cp(r16, trig_high)
+    brsh(LOC(NEXT_SAMPLE))
+    jmp(LOC(WAIT_TRIG_RISING_2))
 
 ENDFUNC ; main
 
