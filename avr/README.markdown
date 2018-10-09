@@ -51,14 +51,17 @@ d  0 1 1 1 1 0 1  1011 101
 e  1 0 0 1 1 1 1  1100 111 
 f  1 0 0 0 1 1 1  1100 110 
 
-## ADC Voltage ref wiring
+## DC sampling
 
-3-bit resistor ladder D/A
+C0 is connected to the input through a 22k resistor. The input has a 100M impedance, so that 22k
+won't affect it significantly, but to reach the 40mA absolute maximum value the input voltage
+shall exceed 880V - not impossible but highly unlikely.
 
-Bit 2 - C5
-Bit 1 - C4
-Bit 0 - C3
+FIXME: a fast reverse-directed diode would be a good idea to clamp the negative inputs as well.
 
-Reference levels: 1, 2, 4, 7
+## AC sampling
 
+A 2 x 47k divisor is connected between VRef and GND, producing a midpoint. C1 is connected to
+this midpoint via a 1M resistor, and to the input via a 10uF capacitor.
 
+This way the AC component of the input is readable on ADC1, centered in the current voltage range

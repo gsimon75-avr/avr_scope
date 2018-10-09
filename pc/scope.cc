@@ -23,6 +23,7 @@ int sample_rate = 6;
 const int voltages[] = { 5, 20 };
 const uint16_t voltage_factors[] = { 216, 250 }; // Vref / desired_unit * 256
 int voltage_ref = 1;
+int zero_level = 0; // 0:DC, 1:AC
 
 trig_type_t trig_type = TRIG_NONE;
 uint8_t trig_level = 0x80;
@@ -94,6 +95,12 @@ main(int argc, char **argv) {
                 voltage_ref = (voltage_ref + 1) & 1;
                 set_voltage_ref(voltage_ref);
                 redraw_voltage_scale(voltages[voltage_ref]);
+                break;
+
+                case SDLK_z:
+                zero_level = (zero_level + 1) & 1;
+                set_zero_level(zero_level);
+                //redraw_voltage_scale(voltages[voltage_ref]);
                 break;
 
                 case SDLK_UP:

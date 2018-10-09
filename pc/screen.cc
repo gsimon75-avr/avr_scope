@@ -211,10 +211,19 @@ void
 set_voltage_ref(uint8_t n) {
     char buf[32];
     printf("voltage_ref=%d\n", n);
-    snprintf(buf, sizeof(buf), "%XR", n & 3);
+    snprintf(buf, sizeof(buf), "%XR", n & 1);
     usleep(1000); write(fd_serial, buf + 0, 1);
     usleep(1000); write(fd_serial, buf + 1, 1);
     voltage_factor = voltage_factors[n];
+}
+
+void
+set_zero_level(uint8_t n) {
+    char buf[32];
+    printf("zero_level=%d\n", n);
+    snprintf(buf, sizeof(buf), "%XZ", n & 1);
+    usleep(1000); write(fd_serial, buf + 0, 1);
+    usleep(1000); write(fd_serial, buf + 1, 1);
 }
 
 void

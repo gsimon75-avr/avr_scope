@@ -19,6 +19,7 @@ define({trig_level}, r11)
 define({usart_sreg_tmp}, r12)
 define({adc_sreg_tmp}, r14)
 ; generic working registers: r16, r17
+define({admux}, r22)
 define({delay_counter_max}, r23)
 define({cmd_start_adc}, r24)
 define({trig_type}, r25)
@@ -243,7 +244,7 @@ FUNCTION(set_sample_rate)
     ; 4:  20 us =  320 clks, N =  38
     ; 5:  50 us =  800 clks, N =  98
     ; 6: 100 us = 1600 clks, N = 198
-    ldi(cmd_start_adc, _BV(ADEN, ADSC) | 2)
+    ldi(cmd_start_adc, _BV(ADEN, ADSC) | 3) ; 2)
     ldi(delay_counter_max, 0)
     tst(r16)
     breq(LOC(DONE))
@@ -282,6 +283,8 @@ FUNCTION(USART_RX_vect)
     breq(LOC(SET_SPEED))
     cpi(r16, 'R')
     breq(LOC(SET_VREF))
+    cpi(r16, 'Z')
+    breq(LOC(SET_ZERO))
     cpi(r16, 'T')
     breq(LOC(SET_TRIG_TYPE))
     cpi(r16, 'L')
@@ -295,7 +298,7 @@ FUNCTION(USART_RX_vect)
     breq(LOC(SET_PWM_ACTIVE))
 
     cpi(r16, '0')
-    brlt(LOC(DONE))
+    brlt(LOC(DONE2))
     cpi(r16, '9' + 1)
     brge(LOC(NOT_09))
     subi(r16, '0')
@@ -318,6 +321,7 @@ FUNCTION(USART_RX_vect)
 
   LOC(DIGIT):
     rcall(recvd_push)
+  LOC(DONE2):
     rjmp(LOC(DONE))
 
   LOC(SET_SPEED):
@@ -327,11 +331,18 @@ FUNCTION(USART_RX_vect)
 
   LOC(SET_VREF):
     rcall(recvd_pop)
-    andi(r16, 0x01)
+    andi(admux, 0xff - _BV(REFS1))
     sbrc(r16, 0)
-    ldi(r16, _BV(REFS1)) ; ref=AVcc
-    addi(r16, _BV(ADLAR, REFS1, REFS0) | 0) ; input=C0, left adjust, ref={AVcc or bandgap 1.1V}
-    sts(ADMUX, r16)
+    ori(admux, _BV(REFS1)) ; ref=AVcc
+    sts(ADMUX, admux)
+    rjmp(LOC(DONE))
+
+  LOC(SET_ZERO):
+    rcall(recvd_pop)
+    cbr(admux, 0x0f)
+    andi(r16, 0x01)
+    or(admux, r16)
+    sts(ADMUX, admux)
     rjmp(LOC(DONE))
 
   LOC(SET_TRIG_TYPE):
@@ -458,8 +469,8 @@ FUNCTION(main)
     sts(OCR2B, r16) ; pwm high state length, must be < wave length, now: 100/250 = 40%
 
     ; Set up ADC
-    ldi(r16, _BV(ADLAR, REFS0)) ; 20 mV per unit
-    sts(ADMUX, r16)
+    ldi(admux, _BV(ADLAR, REFS1, REFS0)) ; input=C0, left adjust, ref=AVcc -> 20 mV per unit
+    sts(ADMUX, admux)
     ; Set up delay block address
     ldi(r16, 0)
     rcall(set_sample_rate)

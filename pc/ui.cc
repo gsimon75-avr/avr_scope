@@ -38,32 +38,57 @@ putstr(uint32_t *pixbuf, int stride, int x, int y, const char *s, int colour) {
 
 void
 format_with_suffix(char *buf, int bufsize, float x) {
-    if (x < 1e-12)
-        snprintf(buf, bufsize, "0");
-    else if (x < 1e-9)
-        snprintf(buf, bufsize, "%.1fp", x * 1e12);
-    else if (x < 1e-6)
-        snprintf(buf, bufsize, "%.1fn", x * 1e9);
-    else if (x < 1e-3)
-        snprintf(buf, bufsize, "%.1fu", x * 1e6);
-    else if (x < 1)
-        snprintf(buf, bufsize, "%.1fm", x * 1e3);
-    else if (x < 10)
-        snprintf(buf, bufsize, "%4.2f", x);
-    else if (x < 100)
-        snprintf(buf, bufsize, "%4.1f", x);
-    else if (x < 10000)
-        snprintf(buf, bufsize, "%.1f", x);
-    else if (x < 1e6)
-        snprintf(buf, bufsize, "%.1fk", x * 1e-3);
-    else if (x < 1e9)
-        snprintf(buf, bufsize, "%.1fM", x * 1e-6);
-    else if (x < 1e12)
-        snprintf(buf, bufsize, "%.1fG", x * 1e-9);
-    else if (x < 1e15)
-        snprintf(buf, bufsize, "%.1fT", x * 1e-12);
+    char suffix = ' ';
+
+    if (x < 1e-12) {
+        x = 0;
+    }
+    else if (x < 1e-9) {
+        x *= 1e12;
+        suffix = 'p';
+    }
+    else if (x < 1e-6) {
+        x *= 1e9;
+        suffix = 'n';
+    }
+    else if (x < 1e-3) {
+        x *= 1e6;
+        suffix = 'u';
+    }
+    else if (x < 1) {
+        x *= 1e3;
+        suffix = 'm';
+    }
+    else if (x < 1000) {
+    }
+    else if (x < 1e6) {
+        x *= 1e-3;
+        suffix = 'k';
+    }
+    else if (x < 1e9) {
+        x *= 1e-6;
+        suffix = 'M';
+    }
+    else if (x < 1e12) {
+        x *= 1e-9;
+        suffix = 'G';
+    }
+    else if (x < 1e15) {
+        x *= 1e-12;
+        suffix = 'T';
+    }
+    else {
+        x = 0;
+        suffix = '?';
+    }
+
+    // round x to one decimal
+    int n10 = (int)(x * 10 + 0.5);
+
+    if (n10 % 10)  
+        snprintf(buf, bufsize, "%.1f%c", 0.1 * n10, suffix);
     else
-        snprintf(buf, bufsize, "inf");
+        snprintf(buf, bufsize, "%d%c", n10 / 10, suffix);
 }
 
 void
