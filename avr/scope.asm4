@@ -280,7 +280,7 @@ FUNCTION(set_vref)
     sbrc(r16, 0)
     ori(admux, _BV(REFS1)) ; ref=AVcc
     sts(ADMUX, admux)
-    ;set() ; re-check trig
+    set() ; re-check trig
     ret()
 ENDFUNC ; set_vref
 
@@ -291,7 +291,7 @@ FUNCTION(set_zero_mode)
     andi(r16, 0x01)
     or(admux, r16)
     sts(ADMUX, admux)
-    ;set() ; re-check trig
+    set() ; re-check trig
     ret()
 ENDFUNC ; set_zero_mode
 
@@ -300,7 +300,7 @@ FUNCTION(set_trig_type)
     ; In: r16
     andi(r16, 0x03)
     mov(trig_type, r16)
-    ;set() ; re-check trig
+    set() ; re-check trig
     ret()
 ENDFUNC ; set_trig_type
 
@@ -319,7 +319,7 @@ FUNCTION(set_trig_level)
     ldi(r17, TRIG_HIST)
   LOC(TRIG_LEVEL_NOT_TOO_LOW):
     mov(trig_low, r17)
-    ;set() ; re-check trig
+    set() ; re-check trig
     ret()
 ENDFUNC ; set_trig_level
 
@@ -431,29 +431,26 @@ FUNCTION(USART_RX_vect)
   LOC(DONE):
     pop(r17)
     pop(r16)
-;    brts(LOC(PRESERVE_T))
+    brts(LOC(PRESERVE_T))
     out(SREG, usart_sreg_tmp)
     reti()
-;  LOC(PRESERVE_T):
-;    out(SREG, usart_sreg_tmp)
-;    set()
-;    reti()
+  LOC(PRESERVE_T):
+    out(SREG, usart_sreg_tmp)
+    set()
+    reti()
 ENDFUNC ; USART_RX_vect
 
 FUNCTION(USART_UDRE_vect)
-    brts(LOC(DONE))
-    ;sbis(GPIOR0, SEND_COMPLETE)
-    ;reti()
+    sbic(GPIOR0, SEND_COMPLETE)
+    reti()
     in(usart_sreg_tmp, SREG)
     cpi(XH, (samples + NUM_SAMPLES) >> 8)
     brlo(LOC(NEXT_SAMPLE))
     cpi(XL, (samples + NUM_SAMPLES) & 0xff)
     breq(LOC(LAST_SAMPLE))
     brlo(LOC(NEXT_SAMPLE))
-    ;sbi(GPIOR0, SEND_COMPLETE)
     out(SREG, usart_sreg_tmp)
-    set()
-  LOC(DONE):
+    sbi(GPIOR0, SEND_COMPLETE)
     reti()
 
   LOC(LAST_SAMPLE):
@@ -619,34 +616,32 @@ FUNCTION(main)
     ; Send the samples to the USART
     ldi(XL, samples & 0xff)
     ldi(XH, samples >> 8)
-    clt()
-    ;cbi(GPIOR0, SEND_COMPLETE)
+    cbi(GPIOR0, SEND_COMPLETE)
     rcall(USART_UDRE_vect) ; will enable interrupts on return
     
   LOC(WAIT_SEND_COMPLETE):
-    ; USART_UDRE_vect will set T flag when finished
-    brtc(LOC(WAIT_SEND_COMPLETE))
-    ;sbis(GPIOR0, SEND_COMPLETE)
-    ;rjmp(LOC(WAIT_SEND_COMPLETE))
+    ; USART_UDRE_vect will set SEND_COMPLETE flag in GPIOR0 when finished
+    sbis(GPIOR0, SEND_COMPLETE)
+    rjmp(LOC(WAIT_SEND_COMPLETE))
 
     ; Set up sample buffer pointer
     ldi(XL, samples & 0x0f)
     ldi(XH, samples >> 8)
 
   LOC(CHECK_TRIG):
-    ;clt() ; serial data receiver sets T to signal re-evaluating the trig conditions
+    clt() ; serial data receiver sets T to signal re-evaluating the trig conditions
     cpi(trig_type, TRIG_RISING)
     breq(LOC(WAIT_TRIG_RISING))
     cpi(trig_type, TRIG_FALLING)
     brne(LOC(NEXT_SAMPLE))
 
   LOC(WAIT_TRIG_FALLING): ; wait for trig pre-condition
-    ;brts(LOC(CHECK_TRIG))
+    brts(LOC(CHECK_TRIG))
     rcall(read_adc)
     cp(r16, trig_high)
     brlo(LOC(WAIT_TRIG_FALLING))
   LOC(WAIT_TRIG_FALLING_2): ; wait for trig condition
-    ;brts(LOC(CHECK_TRIG))
+    brts(LOC(CHECK_TRIG))
     ; rcall(read_adc) ; inlined below to reclaim 3+4 clks of `rcall + ret`
     sts(ADCSRA, cmd_start_adc)
   LOC(WAIT_COMPLETE_F):
@@ -659,12 +654,12 @@ FUNCTION(main)
     rjmp(LOC(WAIT_TRIG_FALLING_2))
 
   LOC(WAIT_TRIG_RISING): ; wait for trig pre-condition
-    ;brts(LOC(CHECK_TRIG))
+    brts(LOC(CHECK_TRIG))
     rcall(read_adc)
     cp(r16, trig_low)
     brsh(LOC(WAIT_TRIG_RISING))
   LOC(WAIT_TRIG_RISING_2): ; wait for trig condition
-    ;brts(LOC(CHECK_TRIG))
+    brts(LOC(CHECK_TRIG))
     ;rcall(read_adc) ; inlined below to reclaim 3+4 clks of `rcall + ret`
     sts(ADCSRA, cmd_start_adc)
   LOC(WAIT_COMPLETE_R):
