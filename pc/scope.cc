@@ -1,5 +1,6 @@
 #include "common.h"
 #include "screen.h"
+#include "device.h"
 #include "ui.h"
 
 #include <stdint.h>
@@ -28,6 +29,11 @@ int zero_level = 0; // 0:DC, 1:AC
 trig_type_t trig_type = TRIG_NONE;
 uint8_t trig_level = 0x80;
 
+// pwm freq: (16M/32) / 250 = 2 kHz, duty cycle: 100/250 = 40%
+uint8_t pwm_prescaler = 3;
+uint8_t pwm_total = 250 - 1;
+uint8_t pwm_high = 100;
+
 int
 main(int argc, char **argv) {
     int i;
@@ -45,7 +51,8 @@ main(int argc, char **argv) {
     SDL_RenderClear(renderer);
 
     init_ui();
-    init_screen("/dev/ttyUSB1");
+    init_screen();
+    init_device("/dev/ttyUSB1");
     set_sample_rate(sample_rate);
     redraw_time_scale(sample_times[sample_rate]);
     set_voltage_ref(voltage_ref);
@@ -119,6 +126,52 @@ main(int argc, char **argv) {
                 }
                 break;
 
+                case SDLK_PAGEUP:
+                if (e.key.keysym.mod & KMOD_CTRL) {
+                    if (pwm_prescaler < 7) {
+                        ++pwm_prescaler;
+                        set_pwm_prescaler(pwm_prescaler);
+                    }
+                }
+                else if (e.key.keysym.mod & KMOD_SHIFT) {
+                    if (pwm_high < (pwm_total - 1)) {
+                        ++pwm_high;
+                        set_pwm_high(pwm_high);
+                    }
+                }
+                else {
+                    if (pwm_total < 0xff) {
+                        ++pwm_total;
+                        set_pwm_total(pwm_total);
+                    }
+                }
+                break;
+
+                case SDLK_PAGEDOWN:
+                if (e.key.keysym.mod & KMOD_CTRL) {
+                    if (pwm_prescaler > 0) {
+                        --pwm_prescaler;
+                        set_pwm_prescaler(pwm_prescaler);
+                    }
+                }
+                else if (e.key.keysym.mod & KMOD_SHIFT) {
+                    if (pwm_high > 1) {
+                        --pwm_high;
+                        set_pwm_high(pwm_high);
+                    }
+                }
+                else {
+                    if (pwm_total > 2) {
+                        --pwm_total;
+                        if (pwm_high >= pwm_total) {
+                            pwm_high = pwm_total - 1;
+                            set_pwm_high(pwm_high);
+                        }
+                        set_pwm_total(pwm_total);
+                    }
+                }
+                break;
+
                 case SDLK_t:
                 trig_type = (trig_type_t)(1 + (int)trig_type);
                 if (trig_type >= TRIG_MAX)
@@ -131,6 +184,7 @@ main(int argc, char **argv) {
     }
     do_quit = true;
     write(quit_notify_fds[1], "x", 1);
+    shutdown_device();
     shutdown_screen();
     shutdown_ui();
     printf("bye\n");

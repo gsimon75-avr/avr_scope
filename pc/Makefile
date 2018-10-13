@@ -22,7 +22,7 @@ run:		scope
 %.o:		%.cc common.h
 		$(CXX) -c $(CFLAGS) $(CXXFLAGS) $^
 
-scope:		scope.o ProggyOpti.o screen.o ui.o
+scope:		scope.o ProggyOpti.o screen.o ui.o device.o
 		$(CXX) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
 dump:		dump.o
