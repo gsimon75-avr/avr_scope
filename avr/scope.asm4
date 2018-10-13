@@ -12,6 +12,9 @@ define({TRIG_NONE}, 0)
 define({TRIG_RISING}, 1)
 define({TRIG_FALLING}, 2)
 
+; flags in GPIOR0
+define({SEND_COMPLETE}, 0)
+
 ; register mapping
 define({trig_low}, r9)
 define({trig_high}, r10)
@@ -267,10 +270,74 @@ FUNCTION(set_sample_rate)
     ldi(delay_counter_max, 198)
   LOC(DONE):
     mov(r16, delay_counter_max)
-    andi(r16, 0x0f)
-    rcall(led_num)
     ret()
 ENDFUNC ; set_sample_rate
+
+
+FUNCTION(set_vref)
+    ; In: r16
+    andi(admux, 0xff - _BV(REFS1))
+    sbrc(r16, 0)
+    ori(admux, _BV(REFS1)) ; ref=AVcc
+    sts(ADMUX, admux)
+    ;set() ; re-check trig
+    ret()
+ENDFUNC ; set_vref
+
+
+FUNCTION(set_zero_mode)
+    ; In: r16
+    cbr(admux, 0x0f)
+    andi(r16, 0x01)
+    or(admux, r16)
+    sts(ADMUX, admux)
+    ;set() ; re-check trig
+    ret()
+ENDFUNC ; set_zero_mode
+
+
+FUNCTION(set_trig_type)
+    ; In: r16
+    andi(r16, 0x03)
+    mov(trig_type, r16)
+    ;set() ; re-check trig
+    ret()
+ENDFUNC ; set_trig_type
+
+
+FUNCTION(set_trig_level)
+    ; In: r16
+    mov(trig_level, r16)
+    mov(r17, r16)
+    addi(r16, TRIG_HIST)
+    brcs(LOC(TRIG_LEVEL_NOT_TOO_HIGH))
+    ldi(r16, 0xff - TRIG_HIST)
+  LOC(TRIG_LEVEL_NOT_TOO_HIGH):
+    mov(trig_high, r16)
+    subi(r17, TRIG_HIST)
+    brcc(LOC(TRIG_LEVEL_NOT_TOO_LOW))
+    ldi(r17, TRIG_HIST)
+  LOC(TRIG_LEVEL_NOT_TOO_LOW):
+    mov(trig_low, r17)
+    ;set() ; re-check trig
+    ret()
+ENDFUNC ; set_trig_level
+
+
+FUNCTION(set_pwm_prescaler)
+    ; In: r16
+    andi(r16, 0x07)
+    ori(r16, _BV(WGM22))
+    sts(TCCR2B, r16)
+    ret()
+ENDFUNC ; set_pwm_prescaler
+
+
+;FUNCTION(set_)
+;    ; In: r16
+;    ret()
+;ENDFUNC ; set_
+
 
 FUNCTION(USART_RX_vect)
     in(usart_sreg_tmp, SREG)
@@ -290,38 +357,35 @@ FUNCTION(USART_RX_vect)
     cpi(r16, 'L')
     breq(LOC(SET_TRIG_LEVEL))
 
-    cpi(r16, 'p')
-    breq(LOC(SET_PWM_PRESCALER))
     cpi(r16, 't')
     breq(LOC(SET_PWM_TOTAL))
     cpi(r16, 'h')
-    breq(LOC(SET_PWM_ACTIVE))
+    breq(LOC(SET_PWM_HIGH))
+    cpi(r16, 'p')
+    breq(LOC(SET_PWM_PRESCALER))
 
     cpi(r16, '0')
-    brlt(LOC(DONE2))
+    brlt(LOC(NOT_DIGIT))
     cpi(r16, '9' + 1)
     brge(LOC(NOT_09))
     subi(r16, '0')
     rjmp(LOC(DIGIT))
-
   LOC(NOT_09):
     cpi(r16, 'A')
-    brlt(LOC(DONE))
+    brlt(LOC(NOT_DIGIT))
     cpi(r16, 'F' + 1)
     brge(LOC(NOT_AF))
     subi(r16, 'A' - 10)
     rjmp(LOC(DIGIT))
-
   LOC(NOT_AF):
     cpi(r16, 'a')
-    brlt(LOC(DONE))
+    brlt(LOC(NOT_DIGIT))
     cpi(r16, 'f' + 1)
-    brge(LOC(DONE))
+    brge(LOC(NOT_DIGIT))
     subi(r16, 'a' - 10)
-
   LOC(DIGIT):
     rcall(recvd_push)
-  LOC(DONE2):
+  LOC(NOT_DIGIT):
     rjmp(LOC(DONE))
 
   LOC(SET_SPEED):
@@ -331,47 +395,22 @@ FUNCTION(USART_RX_vect)
 
   LOC(SET_VREF):
     rcall(recvd_pop)
-    andi(admux, 0xff - _BV(REFS1))
-    sbrc(r16, 0)
-    ori(admux, _BV(REFS1)) ; ref=AVcc
-    sts(ADMUX, admux)
+    rcall(set_vref)
     rjmp(LOC(DONE))
 
   LOC(SET_ZERO):
     rcall(recvd_pop)
-    cbr(admux, 0x0f)
-    andi(r16, 0x01)
-    or(admux, r16)
-    sts(ADMUX, admux)
+    rcall(set_zero_mode)
     rjmp(LOC(DONE))
 
   LOC(SET_TRIG_TYPE):
     rcall(recvd_pop)
-    andi(r16, 0x03)
-    mov(trig_type, r16)
+    rcall(set_trig_type)
     rjmp(LOC(DONE))
 
   LOC(SET_TRIG_LEVEL):
     rcall(recvd_pop_byte)
-    mov(trig_level, r16)
-    mov(r17, r16)
-    addi(r16, TRIG_HIST)
-    brcs(LOC(TRIG_LEVEL_NOT_TOO_HIGH))
-    ldi(r16, 0xff - TRIG_HIST)
-  LOC(TRIG_LEVEL_NOT_TOO_HIGH):
-    mov(trig_high, r16)
-    subi(r17, TRIG_HIST)
-    brcc(LOC(TRIG_LEVEL_NOT_TOO_LOW))
-    ldi(r17, TRIG_HIST)
-  LOC(TRIG_LEVEL_NOT_TOO_LOW):
-    mov(trig_low, r17)
-    rjmp(LOC(DONE))
-
-  LOC(SET_PWM_PRESCALER):
-    rcall(recvd_pop)
-    andi(r16, 0x07)
-    ori(r16, _BV(WGM22))
-    sts(TCCR2B, r16)
+    rcall(set_trig_level)
     rjmp(LOC(DONE))
 
   LOC(SET_PWM_TOTAL):
@@ -379,26 +418,39 @@ FUNCTION(USART_RX_vect)
     sts(OCR2A, r16) ; pwm wave length
     rjmp(LOC(DONE))
 
-  LOC(SET_PWM_ACTIVE):
+  LOC(SET_PWM_HIGH):
     rcall(recvd_pop_byte)
-    sts(OCR2B, r16) ; pwm wave length
+    sts(OCR2B, r16) ; pwm wave high
+    rjmp(LOC(DONE))
+
+  LOC(SET_PWM_PRESCALER):
+    rcall(recvd_pop)
+    rcall(set_pwm_prescaler)
     rjmp(LOC(DONE))
 
   LOC(DONE):
     pop(r17)
     pop(r16)
+;    brts(LOC(PRESERVE_T))
     out(SREG, usart_sreg_tmp)
     reti()
+;  LOC(PRESERVE_T):
+;    out(SREG, usart_sreg_tmp)
+;    set()
+;    reti()
 ENDFUNC ; USART_RX_vect
 
 FUNCTION(USART_UDRE_vect)
     brts(LOC(DONE))
+    ;sbis(GPIOR0, SEND_COMPLETE)
+    ;reti()
     in(usart_sreg_tmp, SREG)
     cpi(XH, (samples + NUM_SAMPLES) >> 8)
     brlo(LOC(NEXT_SAMPLE))
     cpi(XL, (samples + NUM_SAMPLES) & 0xff)
     breq(LOC(LAST_SAMPLE))
     brlo(LOC(NEXT_SAMPLE))
+    ;sbi(GPIOR0, SEND_COMPLETE)
     out(SREG, usart_sreg_tmp)
     set()
   LOC(DONE):
@@ -545,7 +597,6 @@ FUNCTION(main)
     sts(ADCSRA, cmd_start_adc) ; 2 clk
     st(X+, r16) ; 2 clk
 
-
     mov(r16, delay_counter_max) ; 1 clk
     ; wait starts
   LOC(WAIT_LOOP):
@@ -565,31 +616,37 @@ FUNCTION(main)
     cpi(XL, (samples + NUM_SAMPLES) & 0xff) ; 1 clk
     brne(LOC(NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
 
-
     ; Send the samples to the USART
     ldi(XL, samples & 0xff)
     ldi(XH, samples >> 8)
     clt()
+    ;cbi(GPIOR0, SEND_COMPLETE)
     rcall(USART_UDRE_vect) ; will enable interrupts on return
     
   LOC(WAIT_SEND_COMPLETE):
     ; USART_UDRE_vect will set T flag when finished
     brtc(LOC(WAIT_SEND_COMPLETE))
+    ;sbis(GPIOR0, SEND_COMPLETE)
+    ;rjmp(LOC(WAIT_SEND_COMPLETE))
 
     ; Set up sample buffer pointer
     ldi(XL, samples & 0x0f)
     ldi(XH, samples >> 8)
 
+  LOC(CHECK_TRIG):
+    ;clt() ; serial data receiver sets T to signal re-evaluating the trig conditions
     cpi(trig_type, TRIG_RISING)
     breq(LOC(WAIT_TRIG_RISING))
     cpi(trig_type, TRIG_FALLING)
     brne(LOC(NEXT_SAMPLE))
 
   LOC(WAIT_TRIG_FALLING): ; wait for trig pre-condition
+    ;brts(LOC(CHECK_TRIG))
     rcall(read_adc)
     cp(r16, trig_high)
     brlo(LOC(WAIT_TRIG_FALLING))
   LOC(WAIT_TRIG_FALLING_2): ; wait for trig condition
+    ;brts(LOC(CHECK_TRIG))
     ; rcall(read_adc) ; inlined below to reclaim 3+4 clks of `rcall + ret`
     sts(ADCSRA, cmd_start_adc)
   LOC(WAIT_COMPLETE_F):
@@ -602,10 +659,12 @@ FUNCTION(main)
     rjmp(LOC(WAIT_TRIG_FALLING_2))
 
   LOC(WAIT_TRIG_RISING): ; wait for trig pre-condition
+    ;brts(LOC(CHECK_TRIG))
     rcall(read_adc)
     cp(r16, trig_low)
     brsh(LOC(WAIT_TRIG_RISING))
   LOC(WAIT_TRIG_RISING_2): ; wait for trig condition
+    ;brts(LOC(CHECK_TRIG))
     ;rcall(read_adc) ; inlined below to reclaim 3+4 clks of `rcall + ret`
     sts(ADCSRA, cmd_start_adc)
   LOC(WAIT_COMPLETE_R):
