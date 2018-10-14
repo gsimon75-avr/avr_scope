@@ -34,6 +34,25 @@ uint8_t pwm_prescaler = 3;
 uint8_t pwm_total = 250 - 1;
 uint8_t pwm_high = 100;
 
+static void
+dump_pwm_freq() {
+    float freq = 16e6;
+
+    switch (pwm_prescaler) {
+        case 0: break; // timer stopped
+        case 1: freq /=    1; break;
+        case 2: freq /=    8; break;
+        case 3: freq /=   32; break;
+        case 4: freq /=   64; break;
+        case 5: freq /=  128; break;
+        case 6: freq /=  256; break;
+        case 7: freq /= 1024; break;
+    }
+    freq /= pwm_total;
+    printf("pwm=%.1fHz %.1f%%\n", freq, (100.0 * pwm_high / pwm_total));
+}
+
+
 int
 main(int argc, char **argv) {
     int i;
@@ -131,18 +150,21 @@ main(int argc, char **argv) {
                     if (pwm_prescaler < 7) {
                         ++pwm_prescaler;
                         set_pwm_prescaler(pwm_prescaler);
+                        dump_pwm_freq();
                     }
                 }
                 else if (e.key.keysym.mod & KMOD_SHIFT) {
                     if (pwm_high < (pwm_total - 1)) {
                         ++pwm_high;
                         set_pwm_high(pwm_high);
+                        dump_pwm_freq();
                     }
                 }
                 else {
                     if (pwm_total < 0xff) {
                         ++pwm_total;
                         set_pwm_total(pwm_total);
+                        dump_pwm_freq();
                     }
                 }
                 break;
@@ -152,12 +174,14 @@ main(int argc, char **argv) {
                     if (pwm_prescaler > 0) {
                         --pwm_prescaler;
                         set_pwm_prescaler(pwm_prescaler);
+                        dump_pwm_freq();
                     }
                 }
                 else if (e.key.keysym.mod & KMOD_SHIFT) {
                     if (pwm_high > 1) {
                         --pwm_high;
                         set_pwm_high(pwm_high);
+                        dump_pwm_freq();
                     }
                 }
                 else {
@@ -168,6 +192,7 @@ main(int argc, char **argv) {
                             set_pwm_high(pwm_high);
                         }
                         set_pwm_total(pwm_total);
+                        dump_pwm_freq();
                     }
                 }
                 break;

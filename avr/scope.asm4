@@ -277,7 +277,7 @@ ENDFUNC ; set_sample_rate
 FUNCTION(set_vref)
     ; In: r16
     andi(admux, 0xff - _BV(REFS1))
-    sbrc(r16, 0)
+    sbrs(r16, 0)
     ori(admux, _BV(REFS1)) ; ref=AVcc
     sts(ADMUX, admux)
     set() ; re-check trig

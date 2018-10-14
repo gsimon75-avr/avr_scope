@@ -86,8 +86,9 @@ set_voltage_ref(uint8_t n) {
 void
 set_zero_level(uint8_t n) {
     char buf[32];
-    printf("zero_level=%d\n", n);
-    snprintf(buf, sizeof(buf), "%XZ", n & 1);
+    n &= 1;
+    printf("zero_level=%s\n", n ? "AC" : "DC");
+    snprintf(buf, sizeof(buf), "%XZ", n);
     usleep(1000); write(fd_serial, buf + 0, 1);
     usleep(1000); write(fd_serial, buf + 1, 1);
 }
