@@ -24,7 +24,8 @@ SDL_Thread *thr_serial;
 
 int fd_serial = -1;
 //const char init_cmd[] = "1R6S80L0T4p0ch31t";
-const char init_cmd[] = "1R6S80L0T";
+//const char init_cmd[] = "1R6S80L0T";
+const char init_cmd[] = "80L";
 
 uint16_t voltage_factor;
 

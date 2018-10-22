@@ -20,19 +20,19 @@ SDL_Renderer *renderer;
 uint32_t user_event_type_base;
 
 const int sample_times[] = { 1, 2, 5, 10, 20, 50, 100 }; // usec
-int sample_rate = 6;
 const int voltages[] = { 5, 20 };
 const uint16_t voltage_factors[] = { 216, 250 }; // Vref / desired_unit * 256
+
+int sample_rate = 3;
 int voltage_ref = 1;
-int zero_level = 0; // 0:DC, 1:AC
+int zero_level = 1; // 0:DC, 1:AC
+trig_type_t trig_type = TRIG_FALLING;
+uint8_t trig_level = 0x40;
 
-trig_type_t trig_type = TRIG_NONE;
-uint8_t trig_level = 0x80;
+uint8_t pwm_prescaler = 6;
+uint8_t pwm_total = 0xff;
+uint8_t pwm_high = 0xfe;
 
-// pwm freq: (16M/32) / 250 = 2 kHz, duty cycle: 100/250 = 40%
-uint8_t pwm_prescaler = 3;
-uint8_t pwm_total = 250 - 1;
-uint8_t pwm_high = 100;
 
 static void
 dump_pwm_freq() {
@@ -72,11 +72,18 @@ main(int argc, char **argv) {
     init_ui();
     init_screen();
     init_device("/dev/ttyUSB1");
+
     set_sample_rate(sample_rate);
-    redraw_time_scale(sample_times[sample_rate]);
     set_voltage_ref(voltage_ref);
-    redraw_voltage_scale(voltages[voltage_ref]);
+    set_zero_level(zero_level);
+    set_trig_type(trig_type);
     set_trig_level(trig_level);
+    set_pwm_prescaler(pwm_prescaler);
+    set_pwm_total(pwm_total);
+    set_pwm_high(pwm_high);
+
+    redraw_time_scale(sample_times[sample_rate]);
+    redraw_voltage_scale(voltages[voltage_ref]);
     redraw_trig_marker(trig_level, trig_type);
 
     while (!do_quit) {
