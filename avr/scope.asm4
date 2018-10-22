@@ -113,62 +113,11 @@ nop()
 
 FUNCTION(trap)
     cli
-    pop(r16)
-    lsr(r16)
-    lsr(r16)
-    dec(r16)
-    andi(r16, 0x0f)
-    rcall(led_num)
     ldi(r16, 1)
     rcall(led_dot)
   LOC(q):
     rjmp(LOC(q))
 ENDFUNC
-
-FUNCTION(led_num)
-    ; In: r16 = n
-    ; Out: none
-    ; Changes: SREG
-    
-    push(ZL)
-    push(ZH)
-    cpi(r16, 0x10)
-    brsh(LOC(OFF))
-
-    mov(ZL, r16)
-    clr(ZH)
-    addiw(ZL, ZH, led_b210 << 1)
-    lpm(ZH, Z)
-    in(ZL, PORTB)
-    andi(ZL, 0xf8)
-    or(ZL, ZH)
-    out(PORTB, ZL)
-    
-    mov(ZL, r16)
-    clr(ZH)
-    addiw(ZL, ZH, led_d7654 << 1)
-    lpm(ZH, Z)
-    in(ZL, PORTD)
-    andi(ZL, 0x0f)
-    or(ZL, ZH)
-    out(PORTD, ZL)
-    pop(ZH)
-    pop(ZL)
-    ret()
-
-  LOC(OFF):
-    in(ZL, PORTB)
-    andi(ZL, 0xf8)
-    out(PORTB, ZL)
-    
-    in(ZL, PORTD)
-    andi(ZL, 0x0f)
-    out(PORTD, ZL)
-    pop(ZH)
-    pop(ZL)
-    ret()
-ENDFUNC ; led_num
-
 
 FUNCTION(led_dot)
     ; In: r16 = onoff
@@ -182,6 +131,21 @@ FUNCTION(led_dot)
     cbi(PORTD, 2)
     ret()
 ENDFUNC ; led_dot
+
+
+FUNCTION(led_toggle)
+    ; In: none
+    ; Out: none
+    ; Changes: SREG
+    sbic(PORTD, 2)
+    rjmp(LOC(OFF))
+    nop()
+    sbi(PORTD, 2)
+    ret()
+  LOC(OFF):
+    cbi(PORTD, 2)
+    ret()
+ENDFUNC ; led_toggle
 
 
 FUNCTION(recvd_push)
@@ -482,6 +446,115 @@ FUNCTION(read_adc)
 ENDFUNC ; read_adc
 
 
+FUNCTION(sampler_analog_scope)
+    ; Read the next sweep of samples from ADC
+  LOC(CHECK_TRIG):
+    clt() ; serial data receiver sets T to signal re-evaluating the trig conditions
+    cpi(trig_type, TRIG_RISING)
+    breq(LOC(WAIT_TRIG_RISING))
+    cpi(trig_type, TRIG_FALLING)
+    brne(LOC(NEXT_SAMPLE))
+
+  LOC(WAIT_TRIG_FALLING): ; wait for trig pre-condition
+    brts(LOC(CHECK_TRIG))
+    rcall(read_adc)
+    cp(r16, trig_high)
+    brlo(LOC(WAIT_TRIG_FALLING))
+  LOC(WAIT_TRIG_FALLING_2): ; wait for trig condition
+    brts(LOC(CHECK_TRIG))
+    ; rcall(read_adc) ; inlined below to reclaim 3+4 clks of `rcall + ret`
+    sts(ADCSRA, cmd_start_adc)
+  LOC(WAIT_COMPLETE_F):
+    lds(r16, ADCSRA)
+    andi(r16, _BV(ADSC))
+    brne(LOC(WAIT_COMPLETE_F))
+    lds(r16, ADCH)
+    cp(r16, trig_low)
+    brlo(LOC(NEXT_SAMPLE))
+    rjmp(LOC(WAIT_TRIG_FALLING_2))
+
+  LOC(WAIT_TRIG_RISING): ; wait for trig pre-condition
+    brts(LOC(CHECK_TRIG))
+    rcall(read_adc)
+    cp(r16, trig_low)
+    brsh(LOC(WAIT_TRIG_RISING))
+  LOC(WAIT_TRIG_RISING_2): ; wait for trig condition
+    brts(LOC(CHECK_TRIG))
+    ;rcall(read_adc) ; inlined below to reclaim 3+4 clks of `rcall + ret`
+    sts(ADCSRA, cmd_start_adc)
+  LOC(WAIT_COMPLETE_R):
+    lds(r16, ADCSRA)
+    andi(r16, _BV(ADSC))
+    brne(LOC(WAIT_COMPLETE_R))
+    lds(r16, ADCH)
+    cp(r16, trig_high)
+    brlo(LOC(WAIT_TRIG_RISING_2))
+
+    ; The point here is to create a delay loop with a constant and a repeatable part
+    ; whose sum is a divisor of 16 clks and can express 1600 at top.
+    ; I don't want to unroll 1600 `nop`s, at least not until all more civil approaches
+    ; have been exhausted, so it'll be a loop with a counter.
+    ;
+    ; The constant part has to do the actual work (read and store the ADC value,
+    ; increment the dest pointer and check for end-of-sweep), so it's at least
+    ; 2+2+2+1 + 1+1+(2+2 | 1+1+2) = 13 clks, so when expressing 16, we have two approaches:
+    ;
+    ; 1. The loop runs once, and the repeating part can be at most 3 clks, which is ok for a `dec; brnz`
+    ; 2. The loop runs 0 times, the constant part takes up 16, but this requires a forward-testing loop
+    ;
+    ; As of approach #1, if the constant part is 13 and the repeatable 3, it's fine for 16, but
+    ; even for 32 the loop should run (32-13)/3 = 6 1/3 times, so this option is out.
+    ;
+    ; Approach #2 is it then, so the constant part is 16, the loop must be a forward-testing
+    ; one, the repeatable length must divide 16 clks, and must be at least (1600-16)/255 <= 7
+    ; clks long. (At least if I want the counter keep within 8 bits, which I'd prefer to.)
+    ;
+    ; So the repeatable part is either 8 or 16 clks. Even for a forward-test and jump-back 8
+    ; seems fairly enough, so this is the time for some constructive laziness. No point in
+    ; optimising a delay loop, remember ;) ?
+
+    ; The loop with the delay code is 2+2+2+(3)+1 + (1+1+1+1+1+1+2)*N + 1+1+(2+2 | 1+1+2) = 16 + 8*N clks
+    ; That makes N = clks/8 - 2
+    ;
+    ; 100 us = 1600 clks, N = 198
+    ;  50 us =  800 clks, N =  98
+    ;  20 us =  320 clks, N =  38
+    ;  10 us =  160 clks, N =  18
+    ;   5 us =   80 clks, N =   8
+    ;   2 us =   32 clks, N =   2
+    ;   1 us =   16 clks, N =   0
+    
+  LOC(NEXT_SAMPLE):
+    cli() ; 1 clk
+    lds(r16, ADCH) ; 2 clk
+    sts(ADCSRA, cmd_start_adc) ; 2 clk
+    st(X+, r16) ; 2 clk
+
+    mov(r16, delay_counter_max) ; 1 clk
+    ; wait starts
+  LOC(WAIT_LOOP):
+    tst(r16); 1 clk
+    breq(LOC(WAIT_DONE)) ; calculate as 1 clk, add the 2nd (if jump taken) later
+    dec(r16) ; 1 clk
+    nop() ; 1 clk
+    nop() ; 1 clk
+    nop() ; 1 clk
+    rjmp(LOC(WAIT_LOOP)) ; 2 clks
+  LOC(WAIT_DONE):
+    ; wait done
+
+    ; +1 clk, because the `breq` above takes 2 when it actually jumps here
+    cpi(XH, (samples + NUM_SAMPLES) >> 8) ; 1 clk
+    brne(LOC(NEXT_SAMPLE_PLUS_2)) ; 2 clks if branch taken, 1 clk if staying here
+    cpi(XL, (samples + NUM_SAMPLES) & 0xff) ; 1 clk
+    brne(LOC(NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
+    ret() ; 4 clk
+
+  LOC(NEXT_SAMPLE_PLUS_2): ; NOTE: we need to equalise the cases when the 1st and when the 2nd `cpi` decides to jump back
+    rjmp(LOC(NEXT_SAMPLE)) ; 2 clks
+ENDFUNC ; sampler_analog_scope
+
+
 ; ------------------------------------------------------------------------------
 
 FUNCTION(main)
@@ -548,70 +621,16 @@ FUNCTION(main)
     ldi(r16, 0x80)
     mov(trig_level, r16)
 
+    sbi(GPIOR0, SEND_COMPLETE)
+    sei()
+
     ; ------------------------------------------------------------------------------
+  LOC(MAIN_LOOP):
+    ; Set up sample buffer pointer
+    ldi(XL, samples & 0x0f)
+    ldi(XH, samples >> 8)
 
-    ; Read the next sweep of samples
-    ;
-    ; The point here is to create a delay loop with a constant and a repeatable part
-    ; whose sum is a divisor of 16 clks and can express 1600 at top.
-    ; I don't want to unroll 1600 `nop`s, at least not until all more civil approaches
-    ; have been exhausted, so it'll be a loop with a counter.
-    ;
-    ; The constant part has to do the actual work (read and store the ADC value,
-    ; increment the dest pointer and check for end-of-sweep), so it's at least
-    ; 2+2+2+1 + 1+1+(2+2 | 1+1+2) = 13 clks, so when expressing 16, we have two approaches:
-    ;
-    ; 1. The loop runs once, and the repeating part can be at most 3 clks, which is ok for a `dec; brnz`
-    ; 2. The loop runs 0 times, the constant part takes up 16, but this requires a forward-testing loop
-    ;
-    ; As of approach #1, if the constant part is 13 and the repeatable 3, it's fine for 16, but
-    ; even for 32 the loop should run (32-13)/3 = 6 1/3 times, so this option is out.
-    ;
-    ; Approach #2 is it then, so the constant part is 16, the loop must be a forward-testing
-    ; one, the repeatable length must divide 16 clks, and must be at least (1600-16)/255 <= 7
-    ; clks long. (At least if I want the counter keep within 8 bits, which I'd prefer to.)
-    ;
-    ; So the repeatable part is either 8 or 16 clks. Even for a forward-test and jump-back 8
-    ; seems fairly enough, so this is the time for some constructive laziness. No point in
-    ; optimising a delay loop, remember ;) ?
-
-    ; The loop with the delay code is 2+2+2+(3)+1 + (1+1+1+1+1+1+2)*N + 1+1+(2+2 | 1+1+2) = 16 + 8*N clks
-    ; That makes N = clks/8 - 2
-    ;
-    ; 100 us = 1600 clks, N = 198
-    ;  50 us =  800 clks, N =  98
-    ;  20 us =  320 clks, N =  38
-    ;  10 us =  160 clks, N =  18
-    ;   5 us =   80 clks, N =   8
-    ;   2 us =   32 clks, N =   2
-    ;   1 us =   16 clks, N =   0
-    
-  LOC(NEXT_SAMPLE_PLUS_2): ; NOTE: we need to equalise the cases when the 1st and when the 2nd `cpi` decides to jump back
-    rjmp(LOC(NEXT_SAMPLE)) ; 2 clks
-  LOC(NEXT_SAMPLE):
-    cli() ; 1 clk
-    lds(r16, ADCH) ; 2 clk
-    sts(ADCSRA, cmd_start_adc) ; 2 clk
-    st(X+, r16) ; 2 clk
-
-    mov(r16, delay_counter_max) ; 1 clk
-    ; wait starts
-  LOC(WAIT_LOOP):
-    tst(r16); 1 clk
-    breq(LOC(WAIT_DONE)) ; calculate as 1 clk, add the 2nd (if jump taken) later
-    dec(r16) ; 1 clk
-    nop() ; 1 clk
-    nop() ; 1 clk
-    nop() ; 1 clk
-    rjmp(LOC(WAIT_LOOP)) ; 2 clks
-  LOC(WAIT_DONE):
-    ; wait done
-
-    ; +1 clk, because the `breq` above takes 2 when it actually jumps here
-    cpi(XH, (samples + NUM_SAMPLES) >> 8) ; 1 clk
-    brne(LOC(NEXT_SAMPLE_PLUS_2)) ; 2 clks if branch taken, 1 clk if staying here
-    cpi(XL, (samples + NUM_SAMPLES) & 0xff) ; 1 clk
-    brne(LOC(NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
+    rcall(sampler_analog_scope)
 
     ; Send the samples to the USART
     ldi(XL, samples & 0xff)
@@ -624,60 +643,19 @@ FUNCTION(main)
     sbis(GPIOR0, SEND_COMPLETE)
     rjmp(LOC(WAIT_SEND_COMPLETE))
 
-    ; Set up sample buffer pointer
-    ldi(XL, samples & 0x0f)
-    ldi(XH, samples >> 8)
-
-  LOC(CHECK_TRIG):
-    clt() ; serial data receiver sets T to signal re-evaluating the trig conditions
-    cpi(trig_type, TRIG_RISING)
-    breq(LOC(WAIT_TRIG_RISING))
-    cpi(trig_type, TRIG_FALLING)
-    brne(LOC(NEXT_SAMPLE))
-
-  LOC(WAIT_TRIG_FALLING): ; wait for trig pre-condition
-    brts(LOC(CHECK_TRIG))
-    rcall(read_adc)
-    cp(r16, trig_high)
-    brlo(LOC(WAIT_TRIG_FALLING))
-  LOC(WAIT_TRIG_FALLING_2): ; wait for trig condition
-    brts(LOC(CHECK_TRIG))
-    ; rcall(read_adc) ; inlined below to reclaim 3+4 clks of `rcall + ret`
-    sts(ADCSRA, cmd_start_adc)
-  LOC(WAIT_COMPLETE_F):
-    lds(r16, ADCSRA)
-    andi(r16, _BV(ADSC))
-    brne(LOC(WAIT_COMPLETE_F))
-    lds(r16, ADCH)
-    cp(r16, trig_low)
-    brlo(LOC(NEXT_SAMPLE))
-    rjmp(LOC(WAIT_TRIG_FALLING_2))
-
-  LOC(WAIT_TRIG_RISING): ; wait for trig pre-condition
-    brts(LOC(CHECK_TRIG))
-    rcall(read_adc)
-    cp(r16, trig_low)
-    brsh(LOC(WAIT_TRIG_RISING))
-  LOC(WAIT_TRIG_RISING_2): ; wait for trig condition
-    brts(LOC(CHECK_TRIG))
-    ;rcall(read_adc) ; inlined below to reclaim 3+4 clks of `rcall + ret`
-    sts(ADCSRA, cmd_start_adc)
-  LOC(WAIT_COMPLETE_R):
-    lds(r16, ADCSRA)
-    andi(r16, _BV(ADSC))
-    brne(LOC(WAIT_COMPLETE_R))
-    lds(r16, ADCH)
-    cp(r16, trig_high)
-    brsh(LOC(NEXT_SAMPLE))
-    jmp(LOC(WAIT_TRIG_RISING_2))
-
+    rjmp(LOC(MAIN_LOOP))
 ENDFUNC ; main
 
 
 ; ------------------------------------------------------------------------------
 
-led_b210:   .DB 3, 0, 5, 5, 6, 7, 7, 0, 7, 7, 6, 7, 3, 5, 7, 6
-led_d7654:  .DB 0xf0, 0x30, 0xe0, 0x70, 0x30, 0x50, 0xd0, 0x70, 0xf0, 0x70, 0xf0, 0x90, 0xc0, 0xb0, 0xc0, 0xc0
+;    mov(ZL, r16)
+;    clr(ZH)
+;    addiw__ ZL, ZH, led_b210 << 1 
+;       subi  r30, low(-(led_b210 << 1)) 
+;	    sbci  r31, high(-(led_b210 << 1))
+;    lpm(r16, Z)
+;led_b210:   .DB 3, 0, 5, 5, 6, 7, 7, 0, 7, 7, 6, 7, 3, 5, 7, 6
 
 
 ; ------------------------------------------------------------------------------
