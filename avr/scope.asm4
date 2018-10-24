@@ -588,11 +588,16 @@ FUNCTION(sampler_zcd)
     ; Read the next sweep of samples from the comparator input
     sei()
     ; process any pending interrupts here
-    ldi(r16, 3) ; 3=prescaler 1:64, FIXME: _BV(ICES1) ?
+    ;ldi(r16, 3) ; 3=prescaler 1:64
+    ;ldi(r16, 2) ; 2=prescaler 1:8
+    ldi(r16, 1) ; 1=prescaler 1:1
     mov(r0, r16) ; TCCR1B for falling edge capture
     ori(r16, _BV(ICES1))
     mov(r1, r16) ; TCCR1B for rising edge capture
+    clr(r16)
     cli()
+    sts(TCNT1H, r16)
+    sts(TCNT1L, r16)
 
   LOC(NEXT_SAMPLE):
 
@@ -623,7 +628,24 @@ FUNCTION(sampler_zcd)
     brne(LOC(NEXT_SAMPLE_PLUS_2)) ; 2 clks if branch taken, 1 clk if staying here
     cpi(XL, (samples + NUM_SAMPLES) & 0xff) ; 1 clk
     brne(LOC(NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
-    ret() ; 4 clks
+    
+    ; calculate the increments of the timestamps
+    ldi(XL, samples & 0xff)
+    ldi(XH, samples >> 8)
+    clr(r16)
+  LOC(NEXT_DIFF):
+    ld(r17, X)
+    mov(r18, r17)
+    sub(r17, r16)
+    st(X+, r17)
+    mov(r16, r18)
+
+    cpi(XH, (samples + NUM_SAMPLES) >> 8)
+    brne(LOC(NEXT_DIFF))
+    cpi(XL, (samples + NUM_SAMPLES) & 0xff) 
+    brne(LOC(NEXT_DIFF))
+
+    ret()
 
   LOC(NEXT_SAMPLE_PLUS_2): ; NOTE: we need to equalise the cases when the 1st and when the 2nd `cpi` decides to jump back
     rjmp(LOC(NEXT_SAMPLE)) ; 2 clks
@@ -715,24 +737,7 @@ FUNCTION(main)
     sei()
 
     ; ------------------------------------------------------------------------------
-    ldi(r19, 2) ; 3=prescaler 1:64, FIXME: _BV(ICES1) ?
-    ldi(r20, _BV(ICES1))
-    in(r17, PORTD) ; DEBUG
-    ldi(r18, _BV(D_LED))
   LOC(MAIN_LOOP):
-
-;    ; ---- DEBUG from here
-;    in(r16, TIFR1)
-;    andi(r16, _BV(ICF1))
-;    breq(LOC(MAIN_LOOP))
-;    eor(r17, r18)
-;    out(PORTD, r17)
-;    eor(r19, r20)
-;    sts(TCCR1B, r19)
-;    sbi(TIFR1, ICF1)
-;    rjmp(LOC(MAIN_LOOP))
-;    ; ---- DEBUG until here
-
     ; Set up sample buffer pointer
     ldi(XL, samples & 0x0f)
     ldi(XH, samples >> 8)
