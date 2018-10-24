@@ -599,13 +599,9 @@ FUNCTION(sampler_zcd)
     sts(TCCR1B, r0) ; 2 clks
     sbi(TIFR1, ICF1) ; 2 clks
   LOC(WAIT_FALLING):
-    sbis(TIFR1, ICF1) ; 2 clks if skip, 1 clk if continue
+    sbis(TIFR1, ICF1) ; 2 clks if skip, 1 clk if continue -> calculate with 1 clk
     rjmp(LOC(WAIT_FALLING)) ; 2 clks
-
-;    sbic(TIFR1, ICF1) ; 2 clks if skip, 1 clk if continue
-;    rjmp(LOC(GOT_FALLING)) ; 2 clks
-;    rjmp(LOC(WAIT_FALLING)) ; 2 clks
-;  LOC(GOT_FALLING):
+    ; skippin of `sbis` above: 1 clk
     lds(r16, ICR1L) ; 2 clks
     st(X+, r16) ; 2 clks
 
@@ -620,11 +616,6 @@ FUNCTION(sampler_zcd)
   LOC(WAIT_RISING):
     sbis(TIFR1, ICF1)
     rjmp(LOC(WAIT_RISING))
-
-;    sbic(TIFR1, ICF1)
-;    rjmp(LOC(GOT_RISING))
-;    rjmp(LOC(WAIT_RISING))
-;  LOC(GOT_RISING):
     lds(r16, ICR1L)
     st(X+, r16) ; 2 clks
 
@@ -648,7 +639,7 @@ FUNCTION(main)
 
     ; D6 is input (comparator D+), D3 is output (pwm), D2 is output (led)
     in(r16, DDRD)
-    andi(r16, ~_BV(6, 7))
+    andi(r16, ~_BV(6))
     ori(r16, _BV(D_PWM, D_LED))
     out(DDRD, r16)
     
@@ -669,12 +660,12 @@ FUNCTION(main)
     ; on capture event ICF is set in TIFR1, must be manually cleared by *setting* it sbi(TIFR1, ICF)
 
     ; Set up Comparator for Input Capture mode
-    ;ldi(r16, _BV(ACME))
-    ldi(r16, 0)
+    ldi(r16, _BV(ACME))
+    ;ldi(r16, 0)
     sts(ADCSRB, r16)
     ldi(r16, _BV(ACIC))
     out(ACSR, r16)
-    ldi(r16, _BV(AIND0, AIND1))
+    ldi(r16, _BV(AIND0))
     sts(DIDR1, r16)
 
     ; Set up Timer2 for FastPWM mode
