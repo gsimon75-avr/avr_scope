@@ -66,6 +66,15 @@ handle_serial_data(void *userdata) {
 }
 
 void
+set_op_mode(op_mode_t m) {
+    char buf[32];
+    printf("op_mode=%s\n", (m == OP_SCOPE) ? "scope" : (m == OP_ZCD) ? "zcd" : "unknown");
+    snprintf(buf, sizeof(buf), "%XM", m);
+    usleep(1000); write(fd_serial, buf + 0, 1);
+    usleep(1000); write(fd_serial, buf + 1, 1);
+}
+
+void
 set_sample_rate(uint8_t n) {
     char buf[32];
     printf("sample_rate=%d\n", n);

@@ -53,6 +53,12 @@ extern uint32_t user_event_type_base;
 extern const uint16_t voltage_factors[];
 
 typedef enum {
+    OP_SCOPE,
+    OP_ZCD,
+    OP_MAX
+} op_mode_t;
+
+typedef enum {
     TRIG_NONE,
     TRIG_RISING,
     TRIG_FALLING,

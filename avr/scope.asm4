@@ -11,9 +11,18 @@ define({TRIG_HIST}, 4)
 define({TRIG_NONE}, 0)
 define({TRIG_RISING}, 1)
 define({TRIG_FALLING}, 2)
+define({OP_SCOPE}, 0)
+define({OP_ZCD}, 1)
 
 ; flags in GPIOR0
 define({SEND_COMPLETE}, 0)
+
+; port/pin assignment    
+define({D_COMPARATOR}, 4)
+define({D_PWM}, 3)
+define({D_LED}, 2)
+define({C_IN_DC}, 0)
+define({C_IN_AC}, 1)
 
 ; register mapping
 define({trig_low}, r9)
@@ -22,6 +31,7 @@ define({trig_level}, r11)
 define({usart_sreg_tmp}, r12)
 define({adc_sreg_tmp}, r14)
 ; generic working registers: r16, r17
+define({op_mode}, r21)
 define({admux}, r22)
 define({delay_counter_max}, r23)
 define({cmd_start_adc}, r24)
@@ -125,10 +135,10 @@ FUNCTION(led_dot)
     ; Changes: SREG
     cpi(r16, 0)
     breq(LOC(OFF))
-    sbi(PORTD, 2)
+    sbi(PORTD, D_LED)
     ret()
   LOC(OFF):
-    cbi(PORTD, 2)
+    cbi(PORTD, D_LED)
     ret()
 ENDFUNC ; led_dot
 
@@ -137,13 +147,13 @@ FUNCTION(led_toggle)
     ; In: none
     ; Out: none
     ; Changes: SREG
-    sbic(PORTD, 2)
+    sbic(PORTD, D_LED)
     rjmp(LOC(OFF))
     nop()
-    sbi(PORTD, 2)
+    sbi(PORTD, D_LED)
     ret()
   LOC(OFF):
-    cbi(PORTD, 2)
+    cbi(PORTD, D_LED)
     ret()
 ENDFUNC ; led_toggle
 
@@ -260,6 +270,14 @@ FUNCTION(set_zero_mode)
 ENDFUNC ; set_zero_mode
 
 
+FUNCTION(set_op_mode)
+    ; In: r16
+    andi(r16, 0x01)
+    mov(op_mode, r16)
+    ret()
+ENDFUNC ; set_op_mode
+
+
 FUNCTION(set_trig_type)
     ; In: r16
     andi(r16, 0x03)
@@ -320,6 +338,8 @@ FUNCTION(USART_RX_vect)
     breq(LOC(SET_TRIG_TYPE))
     cpi(r16, 'L')
     breq(LOC(SET_TRIG_LEVEL))
+    cpi(r16, 'M')
+    breq(LOC(SET_MODE))
 
     cpi(r16, 't')
     breq(LOC(SET_PWM_TOTAL))
@@ -375,6 +395,11 @@ FUNCTION(USART_RX_vect)
   LOC(SET_TRIG_LEVEL):
     rcall(recvd_pop_byte)
     rcall(set_trig_level)
+    rjmp(LOC(DONE))
+
+  LOC(SET_MODE):
+    rcall(recvd_pop_byte)
+    rcall(set_op_mode)
     rjmp(LOC(DONE))
 
   LOC(SET_PWM_TOTAL):
@@ -444,6 +469,52 @@ FUNCTION(read_adc)
     lds(r16, ADCH)
     ret
 ENDFUNC ; read_adc
+
+
+FUNCTION(sampler_zcd)
+    ; Read the next sweep of samples from the comparator input
+    sei()
+    nop()
+    ; process any pending interrupts here
+    cli()
+
+  LOC(NEXT_SAMPLE):
+
+    clr(r18) ; 1 clk
+  LOC(WAIT_HIGH):
+    sbic(PIND, D_COMPARATOR) ; 2 clks if skipping, 1 clk if staying here
+    rjmp(LOC(INPUT_HIGH)) ; 2 clks
+    inc(r18) ; 1 clk
+    brne(LOC(WAIT_HIGH)) ; 2 clks if branch taken, 1 clk if staying here
+    dec(r18) ; 1 clk
+  LOC(INPUT_HIGH):
+    st(X+, r18) ; 2 clk
+
+    nop() ; the loop control below takes 5 clks to jump back to NEXT_SAMPLE,
+    nop() ; so we wait the same amount here
+    nop()
+    nop()
+    nop()
+    
+    clr(r18) ; 1 clk
+  LOC(WAIT_LOW):
+    sbis(PIND, D_COMPARATOR) ; 2 clks if skipping, 1 clk if staying here
+    rjmp(LOC(INPUT_LOW)) ; 2 clks
+    inc(r18) ; 1 clk
+    brne(LOC(WAIT_LOW)) ; 2 clks if branch taken, 1 clk if staying here
+    dec(r18) ; 1 clk
+  LOC(INPUT_LOW):
+    st(X+, r18) ; 2 clk
+
+    cpi(XH, (samples + NUM_SAMPLES) >> 8) ; 1 clk
+    brne(LOC(NEXT_SAMPLE_PLUS_2)) ; 2 clks if branch taken, 1 clk if staying here
+    cpi(XL, (samples + NUM_SAMPLES) & 0xff) ; 1 clk
+    brne(LOC(NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
+    ret() ; 4 clks
+
+  LOC(NEXT_SAMPLE_PLUS_2): ; NOTE: we need to equalise the cases when the 1st and when the 2nd `cpi` decides to jump back
+    rjmp(LOC(NEXT_SAMPLE)) ; 2 clks
+ENDFUNC ; sampler_zcd
 
 
 FUNCTION(sampler_analog_scope)
@@ -548,7 +619,7 @@ FUNCTION(sampler_analog_scope)
     brne(LOC(NEXT_SAMPLE_PLUS_2)) ; 2 clks if branch taken, 1 clk if staying here
     cpi(XL, (samples + NUM_SAMPLES) & 0xff) ; 1 clk
     brne(LOC(NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
-    ret() ; 4 clk
+    ret() ; 4 clks
 
   LOC(NEXT_SAMPLE_PLUS_2): ; NOTE: we need to equalise the cases when the 1st and when the 2nd `cpi` decides to jump back
     rjmp(LOC(NEXT_SAMPLE)) ; 2 clks
@@ -562,22 +633,18 @@ FUNCTION(main)
     ldi(r16, _BV(PRTWI, PRTIM0, PRSPI0))
     sts(PRR, r16)
 
-    ; B[0..2] are output (lcd)
-    in(r16, DDRB)
-    ori(r16, 0x07)
-    out(DDRB, r16)
-    
-    ; D[2,4..7] are output (lcd), D3 is output (pwm)
+    ; D4 is input (comparator), D3 is output (pwm), D2 is output (led)
     in(r16, DDRD)
-    ori(r16, 0xfc)
+    andi(r16, ~_BV(D_COMPARATOR))
+    ori(r16, _BV(D_PWM, D_LED))
     out(DDRD, r16)
     
-    ; C0 is input (adc)
+    ; C0 and C1 are inputs (adc)
     in(r16, DDRC)
-    andi(r16, ~_BV(0))
+    andi(r16, ~_BV(C_IN_DC, C_IN_AC))
     out(DDRC, r16)
     ; C[0] is analogue input (adc)
-    ldi(r16,  _BV(0))
+    ldi(r16,  _BV(C_IN_DC, C_IN_AC))
     sts(DIDR0, r16)
 
     ; Set up Timer2 for FastPWM mode
@@ -593,7 +660,6 @@ FUNCTION(main)
     ; Set up ADC
     ldi(admux, _BV(ADLAR, REFS1, REFS0)) ; input=C0, left adjust, ref=AVcc -> 20 mV per unit
     sts(ADMUX, admux)
-    ; Set up delay block address
     ldi(r16, 0)
     rcall(set_sample_rate)
 
@@ -611,6 +677,9 @@ FUNCTION(main)
     sts(UCSR0C, r16)
     ldi(r16, _BV(RXEN0, TXEN0, RXCIE0, UDRIE0))
     sts(UCSR0B, r16) ; Enable USART
+
+    ; Set up operation mode
+    ldi(op_mode, OP_SCOPE)
 
     ; Set up sample buffer pointer
     ldi(XL, samples & 0xff)
@@ -630,8 +699,19 @@ FUNCTION(main)
     ldi(XL, samples & 0x0f)
     ldi(XH, samples >> 8)
 
+    cpi(op_mode, OP_SCOPE)
+    brne(LOC(NOT_SCOPE))
     rcall(sampler_analog_scope)
+    rjmp(LOC(SEND_SAMPLES))
+  LOC(NOT_SCOPE):
 
+    cpi(op_mode, OP_ZCD)
+    brne(LOC(NOT_ZCD))
+    rcall(sampler_zcd)
+    rjmp(LOC(SEND_SAMPLES))
+  LOC(NOT_ZCD):
+
+  LOC(SEND_SAMPLES):
     ; Send the samples to the USART
     ldi(XL, samples & 0xff)
     ldi(XH, samples >> 8)
@@ -644,6 +724,7 @@ FUNCTION(main)
     rjmp(LOC(WAIT_SEND_COMPLETE))
 
     rjmp(LOC(MAIN_LOOP))
+
 ENDFUNC ; main
 
 
