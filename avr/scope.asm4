@@ -18,7 +18,6 @@ define({OP_ZCD}, 1)
 define({SEND_COMPLETE}, 0)
 
 ; port/pin assignment    
-define({D_COMPARATOR}, 4)
 define({D_PWM}, 3)
 define({D_LED}, 2)
 define({C_IN_DC}, 0)
@@ -221,7 +220,7 @@ FUNCTION(set_sample_rate)
     ; 4:  20 us =  320 clks, N =  38
     ; 5:  50 us =  800 clks, N =  98
     ; 6: 100 us = 1600 clks, N = 198
-    ldi(cmd_start_adc, _BV(ADEN, ADSC) | 3) ; 2)
+    ldi(cmd_start_adc, _BV(ADEN, ADSC) | 2)
     ldi(delay_counter_max, 0)
     tst(r16)
     breq(LOC(DONE))
@@ -274,6 +273,11 @@ FUNCTION(set_op_mode)
     ; In: r16
     andi(r16, 0x01)
     mov(op_mode, r16)
+    brne(LOC(MODE_ZCD))
+    ret()
+  LOC(MODE_ZCD):
+    clr(r16)
+    sts(ADCSRA, r16)
     ret()
 ENDFUNC ; set_op_mode
 
@@ -471,52 +475,6 @@ FUNCTION(read_adc)
 ENDFUNC ; read_adc
 
 
-FUNCTION(sampler_zcd)
-    ; Read the next sweep of samples from the comparator input
-    sei()
-    nop()
-    ; process any pending interrupts here
-    cli()
-
-  LOC(NEXT_SAMPLE):
-
-    clr(r18) ; 1 clk
-  LOC(WAIT_HIGH):
-    sbic(PIND, D_COMPARATOR) ; 2 clks if skipping, 1 clk if staying here
-    rjmp(LOC(INPUT_HIGH)) ; 2 clks
-    inc(r18) ; 1 clk
-    brne(LOC(WAIT_HIGH)) ; 2 clks if branch taken, 1 clk if staying here
-    dec(r18) ; 1 clk
-  LOC(INPUT_HIGH):
-    st(X+, r18) ; 2 clk
-
-    nop() ; the loop control below takes 5 clks to jump back to NEXT_SAMPLE,
-    nop() ; so we wait the same amount here
-    nop()
-    nop()
-    nop()
-    
-    clr(r18) ; 1 clk
-  LOC(WAIT_LOW):
-    sbis(PIND, D_COMPARATOR) ; 2 clks if skipping, 1 clk if staying here
-    rjmp(LOC(INPUT_LOW)) ; 2 clks
-    inc(r18) ; 1 clk
-    brne(LOC(WAIT_LOW)) ; 2 clks if branch taken, 1 clk if staying here
-    dec(r18) ; 1 clk
-  LOC(INPUT_LOW):
-    st(X+, r18) ; 2 clk
-
-    cpi(XH, (samples + NUM_SAMPLES) >> 8) ; 1 clk
-    brne(LOC(NEXT_SAMPLE_PLUS_2)) ; 2 clks if branch taken, 1 clk if staying here
-    cpi(XL, (samples + NUM_SAMPLES) & 0xff) ; 1 clk
-    brne(LOC(NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
-    ret() ; 4 clks
-
-  LOC(NEXT_SAMPLE_PLUS_2): ; NOTE: we need to equalise the cases when the 1st and when the 2nd `cpi` decides to jump back
-    rjmp(LOC(NEXT_SAMPLE)) ; 2 clks
-ENDFUNC ; sampler_zcd
-
-
 FUNCTION(sampler_analog_scope)
     ; Read the next sweep of samples from ADC
   LOC(CHECK_TRIG):
@@ -626,6 +584,61 @@ FUNCTION(sampler_analog_scope)
 ENDFUNC ; sampler_analog_scope
 
 
+FUNCTION(sampler_zcd)
+    ; Read the next sweep of samples from the comparator input
+    sei()
+    ; process any pending interrupts here
+    ldi(r16, 3) ; 3=prescaler 1:64, FIXME: _BV(ICES1) ?
+    mov(r0, r16) ; TCCR1B for falling edge capture
+    ori(r16, _BV(ICES1))
+    mov(r1, r16) ; TCCR1B for rising edge capture
+    cli()
+
+  LOC(NEXT_SAMPLE):
+
+    sts(TCCR1B, r0) ; 2 clks
+    sbi(TIFR1, ICF1) ; 2 clks
+  LOC(WAIT_FALLING):
+    sbis(TIFR1, ICF1) ; 2 clks if skip, 1 clk if continue
+    rjmp(LOC(WAIT_FALLING)) ; 2 clks
+
+;    sbic(TIFR1, ICF1) ; 2 clks if skip, 1 clk if continue
+;    rjmp(LOC(GOT_FALLING)) ; 2 clks
+;    rjmp(LOC(WAIT_FALLING)) ; 2 clks
+;  LOC(GOT_FALLING):
+    lds(r16, ICR1L) ; 2 clks
+    st(X+, r16) ; 2 clks
+
+    nop() ; the loop control below takes 5 clks to jump back to NEXT_SAMPLE,
+    nop() ; so we wait the same amount here
+    nop()
+    nop()
+    nop()
+    
+    sts(TCCR1B, r1)
+    sbi(TIFR1, ICF1)
+  LOC(WAIT_RISING):
+    sbis(TIFR1, ICF1)
+    rjmp(LOC(WAIT_RISING))
+
+;    sbic(TIFR1, ICF1)
+;    rjmp(LOC(GOT_RISING))
+;    rjmp(LOC(WAIT_RISING))
+;  LOC(GOT_RISING):
+    lds(r16, ICR1L)
+    st(X+, r16) ; 2 clks
+
+    cpi(XH, (samples + NUM_SAMPLES) >> 8) ; 1 clk
+    brne(LOC(NEXT_SAMPLE_PLUS_2)) ; 2 clks if branch taken, 1 clk if staying here
+    cpi(XL, (samples + NUM_SAMPLES) & 0xff) ; 1 clk
+    brne(LOC(NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
+    ret() ; 4 clks
+
+  LOC(NEXT_SAMPLE_PLUS_2): ; NOTE: we need to equalise the cases when the 1st and when the 2nd `cpi` decides to jump back
+    rjmp(LOC(NEXT_SAMPLE)) ; 2 clks
+ENDFUNC ; sampler_zcd
+
+
 ; ------------------------------------------------------------------------------
 
 FUNCTION(main)
@@ -633,9 +646,9 @@ FUNCTION(main)
     ldi(r16, _BV(PRTWI, PRTIM0, PRSPI0))
     sts(PRR, r16)
 
-    ; D4 is input (comparator), D3 is output (pwm), D2 is output (led)
+    ; D6 is input (comparator D+), D3 is output (pwm), D2 is output (led)
     in(r16, DDRD)
-    andi(r16, ~_BV(D_COMPARATOR))
+    andi(r16, ~_BV(6, 7))
     ori(r16, _BV(D_PWM, D_LED))
     out(DDRD, r16)
     
@@ -643,9 +656,26 @@ FUNCTION(main)
     in(r16, DDRC)
     andi(r16, ~_BV(C_IN_DC, C_IN_AC))
     out(DDRC, r16)
-    ; C[0] is analogue input (adc)
+    ; C0 and C1 are analogue inputs (adc)
     ldi(r16,  _BV(C_IN_DC, C_IN_AC))
     sts(DIDR0, r16)
+
+    ; Set up Timer1 for Input Capture mode
+    clr(r16)
+    sts(TCCR1A, r16)
+    ldi(r16, 3) ; 3=prescaler 1:64
+    sts(TCCR1B, r16)
+    ; captured data can be read from ICR1L / H
+    ; on capture event ICF is set in TIFR1, must be manually cleared by *setting* it sbi(TIFR1, ICF)
+
+    ; Set up Comparator for Input Capture mode
+    ;ldi(r16, _BV(ACME))
+    ldi(r16, 0)
+    sts(ADCSRB, r16)
+    ldi(r16, _BV(ACIC))
+    out(ACSR, r16)
+    ldi(r16, _BV(AIND0, AIND1))
+    sts(DIDR1, r16)
 
     ; Set up Timer2 for FastPWM mode
     ldi(r16, _BV(COM2B1, WGM21, WGM20))
@@ -694,7 +724,24 @@ FUNCTION(main)
     sei()
 
     ; ------------------------------------------------------------------------------
+    ldi(r19, 2) ; 3=prescaler 1:64, FIXME: _BV(ICES1) ?
+    ldi(r20, _BV(ICES1))
+    in(r17, PORTD) ; DEBUG
+    ldi(r18, _BV(D_LED))
   LOC(MAIN_LOOP):
+
+;    ; ---- DEBUG from here
+;    in(r16, TIFR1)
+;    andi(r16, _BV(ICF1))
+;    breq(LOC(MAIN_LOOP))
+;    eor(r17, r18)
+;    out(PORTD, r17)
+;    eor(r19, r20)
+;    sts(TCCR1B, r19)
+;    sbi(TIFR1, ICF1)
+;    rjmp(LOC(MAIN_LOOP))
+;    ; ---- DEBUG until here
+
     ; Set up sample buffer pointer
     ldi(XL, samples & 0x0f)
     ldi(XH, samples >> 8)
