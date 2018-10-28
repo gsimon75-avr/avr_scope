@@ -34,9 +34,10 @@ request_redraw() {
 
 void
 end_of_sweep() {
-    printf("sweep=%d\n", curX);
-    curX = 0;
-    request_redraw();
+    if (curX != 0) {
+        request_redraw();
+        curX = 0;
+    }
 }
 
 void
@@ -57,8 +58,12 @@ add_sample(uint8_t y, uint8_t digital) {
 
     if (curX < SCREEN_WIDTH) {
         reinterpret_cast<uint8_t*>(lastOfs[curX])[1] = 0;
+        reinterpret_cast<uint8_t*>(lastOfs[curX])[0] = 0;
         lastOfs[curX] = &screen[(SCREEN_WIDTH * (unsigned int)(255 - y)) + curX];
+        //reinterpret_cast<uint8_t*>(lastOfs[curX])[(digital & 0x08) ? 1 : 0] = 0xff;
         reinterpret_cast<uint8_t*>(lastOfs[curX])[1] = 0xff;
+        if (digital & 0x08)
+            reinterpret_cast<uint8_t*>(lastOfs[curX])[0] = 0xff;
         ++curX;
         if (curX == SCREEN_WIDTH) {
             need_redraw = true;
