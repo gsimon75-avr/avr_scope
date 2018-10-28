@@ -565,8 +565,7 @@ FUNCTION(sampler_analog_scope)
     tst(r16); 1 clk
     breq(LOC(WAIT_DONE)) ; calculate as 1 clk, add the 2nd (if jump taken) later
     dec(r16) ; 1 clk
-    nop() ; 1 clk
-    nop() ; 1 clk
+    nop2(); 2 clks
     nop() ; 1 clk
     rjmp(LOC(WAIT_LOOP)) ; 2 clks
   LOC(WAIT_DONE):
@@ -610,10 +609,8 @@ FUNCTION(sampler_zcd)
     lds(r16, ICR1L) ; 2 clks
     st(X+, r16) ; 2 clks
 
-    nop() ; the loop control below takes 5 clks to jump back to NEXT_SAMPLE,
-    nop() ; so we wait the same amount here
-    nop()
-    nop()
+    nop2() ; the loop control below takes 5 clks to jump back to NEXT_SAMPLE,
+    nop2() ; so we wait the same amount here
     nop()
     
     sts(TCCR1B, r1)
@@ -687,7 +684,7 @@ FUNCTION(main)
     sts(ADCSRB, r16)
     ldi(r16, _BV(ACIC))
     out(ACSR, r16)
-    ldi(r16, _BV(AIND0))
+    ldi(r16, _BV(AIN0D))
     sts(DIDR1, r16)
 
     ; Set up Timer2 for FastPWM mode

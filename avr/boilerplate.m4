@@ -34,6 +34,9 @@ define({addiw}, {subi $1, low(-($3))
 define({ldiw}, {ldi $2, high($3)
 	ldi($1, low($3)})
 
+dnl 2-clks nop
+define({nop2}, rjmp PC+1)
+
 dnl named registers
 define({XL}, r26)
 define({XH}, r27)
