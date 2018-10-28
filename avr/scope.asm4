@@ -437,9 +437,9 @@ FUNCTION(USART_UDRE_vect)
     sbic(GPIOR0, SEND_COMPLETE)
     reti()
     in(usart_sreg_tmp, SREG)
-    cpi(XH, (samples + NUM_SAMPLES) >> 8)
+    cpi(XH, end_of_samples >> 8)
     brlo(LOC(NEXT_SAMPLE))
-    cpi(XL, (samples + NUM_SAMPLES) & 0xff)
+    cpi(XL, end_of_samples & 0xff)
     breq(LOC(LAST_SAMPLE))
     brlo(LOC(NEXT_SAMPLE))
     out(SREG, usart_sreg_tmp)
@@ -477,12 +477,14 @@ ENDFUNC ; read_adc
 
 FUNCTION(sampler_analog_scope)
     ; Read the next sweep of samples from ADC
+    ldi(r16, NUM_SAMPLES / 4)
+    mov(r2, r16)
   LOC(CHECK_TRIG):
     clt() ; serial data receiver sets T to signal re-evaluating the trig conditions
     cpi(trig_type, TRIG_RISING)
     breq(LOC(WAIT_TRIG_RISING))
     cpi(trig_type, TRIG_FALLING)
-    brne(LOC(NEXT_SAMPLE))
+    brne(LOC(START_SAMPLING))
 
   LOC(WAIT_TRIG_FALLING): ; wait for trig pre-condition
     brts(LOC(CHECK_TRIG))
@@ -499,7 +501,7 @@ FUNCTION(sampler_analog_scope)
     brne(LOC(WAIT_COMPLETE_F))
     lds(r16, ADCH)
     cp(r16, trig_low)
-    brlo(LOC(NEXT_SAMPLE))
+    brlo(LOC(START_SAMPLING))
     rjmp(LOC(WAIT_TRIG_FALLING_2))
 
   LOC(WAIT_TRIG_RISING): ; wait for trig pre-condition
@@ -553,33 +555,84 @@ FUNCTION(sampler_analog_scope)
     ;   2 us =   32 clks, N =   2
     ;   1 us =   16 clks, N =   0
     
+  LOC(START_SAMPLING):
+    cli()
   LOC(NEXT_SAMPLE):
-    cli() ; 1 clk
+
     lds(r16, ADCH) ; 2 clk
     sts(ADCSRA, cmd_start_adc) ; 2 clk
     st(X+, r16) ; 2 clk
-
+    in(r16, PIND) ; 1 clk
+    st(X+, r16) ; 2 clk
     mov(r16, delay_counter_max) ; 1 clk
-    ; wait starts
-  LOC(WAIT_LOOP):
+  LOC(WAIT_LOOP_0):
     tst(r16); 1 clk
-    breq(LOC(WAIT_DONE)) ; calculate as 1 clk, add the 2nd (if jump taken) later
+    breq(LOC(WAIT_DONE_0)) ; calculate as 1 clk, add the 2nd one (if jump taken) after the loop
     dec(r16) ; 1 clk
     nop2(); 2 clks
     nop() ; 1 clk
-    rjmp(LOC(WAIT_LOOP)) ; 2 clks
-  LOC(WAIT_DONE):
-    ; wait done
-
+    rjmp(LOC(WAIT_LOOP_0)) ; 2 clks
+  LOC(WAIT_DONE_0):
     ; +1 clk, because the `breq` above takes 2 when it actually jumps here
-    cpi(XH, (samples + NUM_SAMPLES) >> 8) ; 1 clk
-    brne(LOC(NEXT_SAMPLE_PLUS_2)) ; 2 clks if branch taken, 1 clk if staying here
-    cpi(XL, (samples + NUM_SAMPLES) & 0xff) ; 1 clk
-    brne(LOC(NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
-    ret() ; 4 clks
+    nop2(); 2 clks
+    nop() ; 1 clk
 
-  LOC(NEXT_SAMPLE_PLUS_2): ; NOTE: we need to equalise the cases when the 1st and when the 2nd `cpi` decides to jump back
-    rjmp(LOC(NEXT_SAMPLE)) ; 2 clks
+    lds(r16, ADCH) ; 2 clk
+    sts(ADCSRA, cmd_start_adc) ; 2 clk
+    st(X+, r16) ; 2 clk
+    in(r16, PIND) ; 1 clk
+    st(X+, r16) ; 2 clk
+    mov(r16, delay_counter_max) ; 1 clk
+  LOC(WAIT_LOOP_1):
+    tst(r16); 1 clk
+    breq(LOC(WAIT_DONE_1)) ; calculate as 1 clk, add the 2nd one (if jump taken) after the loop
+    dec(r16) ; 1 clk
+    nop2(); 2 clks
+    nop() ; 1 clk
+    rjmp(LOC(WAIT_LOOP_1)) ; 2 clks
+  LOC(WAIT_DONE_1):
+    ; +1 clk, because the `breq` above takes 2 when it actually jumps here
+    nop2(); 2 clks
+    nop() ; 1 clk
+
+    lds(r16, ADCH) ; 2 clk
+    sts(ADCSRA, cmd_start_adc) ; 2 clk
+    st(X+, r16) ; 2 clk
+    in(r16, PIND) ; 1 clk
+    st(X+, r16) ; 2 clk
+    mov(r16, delay_counter_max) ; 1 clk
+  LOC(WAIT_LOOP_2):
+    tst(r16); 1 clk
+    breq(LOC(WAIT_DONE_2)) ; calculate as 1 clk, add the 2nd one (if jump taken) after the loop
+    dec(r16) ; 1 clk
+    nop2(); 2 clks
+    nop() ; 1 clk
+    rjmp(LOC(WAIT_LOOP_2)) ; 2 clks
+  LOC(WAIT_DONE_2):
+    ; +1 clk, because the `breq` above takes 2 when it actually jumps here
+    nop2(); 2 clks
+    nop() ; 1 clk
+
+    lds(r16, ADCH) ; 2 clk
+    sts(ADCSRA, cmd_start_adc) ; 2 clk
+    st(X+, r16) ; 2 clk
+    in(r16, PIND) ; 1 clk
+    st(X+, r16) ; 2 clk
+    mov(r16, delay_counter_max) ; 1 clk
+  LOC(WAIT_LOOP_3):
+    tst(r16); 1 clk
+    breq(LOC(WAIT_DONE_3)) ; calculate as 1 clk, add the 2nd one (if jump taken) after the loop
+    dec(r16) ; 1 clk
+    nop2(); 2 clks
+    nop() ; 1 clk
+    rjmp(LOC(WAIT_LOOP_3)) ; 2 clks
+  LOC(WAIT_DONE_3):
+    ; +1 clk, because the `breq` above takes 2 when it actually jumps here
+
+    dec(r2) ; 1 clk
+    brne(LOC(NEXT_SAMPLE)) ; 2 clks
+
+    ret() ; 4 clks
 ENDFUNC ; sampler_analog_scope
 
 
@@ -605,14 +658,12 @@ FUNCTION(sampler_zcd)
   LOC(WAIT_FALLING):
     sbis(TIFR1, ICF1) ; 2 clks if skip, 1 clk if continue -> calculate with 1 clk
     rjmp(LOC(WAIT_FALLING)) ; 2 clks
-    ; skippin of `sbis` above: 1 clk
+    ; skipping of `sbis` above: 1 clk
     lds(r16, ICR1L) ; 2 clks
     st(X+, r16) ; 2 clks
+    in(r16, PIND) ; 1 clk
+    st(X+, r16) ; 2 clk
 
-    nop2() ; the loop control below takes 5 clks to jump back to NEXT_SAMPLE,
-    nop2() ; so we wait the same amount here
-    nop()
-    
     sts(TCCR1B, r1)
     sbi(TIFR1, ICF1)
   LOC(WAIT_RISING):
@@ -620,10 +671,12 @@ FUNCTION(sampler_zcd)
     rjmp(LOC(WAIT_RISING))
     lds(r16, ICR1L)
     st(X+, r16) ; 2 clks
+    in(r16, PIND) ; 1 clk
+    st(X+, r16) ; 2 clk
 
-    cpi(XH, (samples + NUM_SAMPLES) >> 8) ; 1 clk
-    brne(LOC(NEXT_SAMPLE_PLUS_2)) ; 2 clks if branch taken, 1 clk if staying here
-    cpi(XL, (samples + NUM_SAMPLES) & 0xff) ; 1 clk
+    cpi(XH, end_of_samples >> 8) ; 1 clk
+    brne(LOC(NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
+    cpi(XL, end_of_samples & 0xff) ; 1 clk
     brne(LOC(NEXT_SAMPLE)) ; 2 clks if branch taken, 1 clk if staying here
     
     ; calculate the increments of the timestamps
@@ -634,18 +687,16 @@ FUNCTION(sampler_zcd)
     ld(r17, X)
     mov(r18, r17)
     sub(r17, r16)
-    st(X+, r17)
+    st(X, r17)
+    adiw(XL, 2)
     mov(r16, r18)
 
-    cpi(XH, (samples + NUM_SAMPLES) >> 8)
+    cpi(XH, end_of_samples >> 8)
     brne(LOC(NEXT_DIFF))
-    cpi(XL, (samples + NUM_SAMPLES) & 0xff) 
+    cpi(XL, end_of_samples & 0xff) 
     brne(LOC(NEXT_DIFF))
 
     ret()
-
-  LOC(NEXT_SAMPLE_PLUS_2): ; NOTE: we need to equalise the cases when the 1st and when the 2nd `cpi` decides to jump back
-    rjmp(LOC(NEXT_SAMPLE)) ; 2 clks
 ENDFUNC ; sampler_zcd
 
 
@@ -684,7 +735,7 @@ FUNCTION(main)
     sts(ADCSRB, r16)
     ldi(r16, _BV(ACIC))
     out(ACSR, r16)
-    ldi(r16, _BV(AIN0D))
+    ldi(r16, _BV(AIND0))
     sts(DIDR1, r16)
 
     ; Set up Timer2 for FastPWM mode
@@ -782,6 +833,7 @@ ENDFUNC ; main
 ; ------------------------------------------------------------------------------
 .DSEG
 recv_buf:           .byte 1*RECV_BUF_SIZE
-samples:            .byte 1*NUM_SAMPLES
+samples:            .byte 2*NUM_SAMPLES
+end_of_samples:
 
 ;{ vim: set sw=4 ts=4 ft=asm et: }

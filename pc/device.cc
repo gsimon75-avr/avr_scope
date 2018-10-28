@@ -29,6 +29,32 @@ const char init_cmd[] = "80L";
 
 uint16_t voltage_factor;
 
+void
+handle_byte(uint8_t v) {
+    static int phase = 0;
+    static uint8_t y = 0;
+
+    switch (phase) {
+        case 0: {
+            if (v == 0xff) {
+                end_of_sweep();
+                phase = 0;
+            }
+            else {
+                y = v;
+                phase = 1;
+            }
+        }
+        break;
+
+        case 1: {
+            add_sample(y, v);
+            phase = 0;
+        }
+        break;
+    }
+}
+
 int
 handle_serial_data(void *userdata) {
     struct pollfd pfd[2];
@@ -57,7 +83,7 @@ handle_serial_data(void *userdata) {
             }
             else {
                 for (size_t i = 0; i < len; ++i)
-                    add_sample(values[i]);
+                    handle_byte(values[i]);
             }
         }
     }

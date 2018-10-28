@@ -22,9 +22,27 @@ SDL_Texture *txt_density;
 SDL_Rect dst_density { DENSITY_X, DENSITY_Y, DENSITY_WIDTH, DENSITY_HEIGHT };
 
 void
-add_sample(uint8_t y) {
+request_redraw() {
+    SDL_Event event;
+    SDL_zero(event);
+    event.type = user_event_type_base;
+    event.user.code = UEVENT_DATA_READY;
+    event.user.data1 = nullptr;
+    event.user.data2 = nullptr;
+    SDL_PushEvent(&event);
+}
+
+void
+end_of_sweep() {
+    printf("sweep=%d\n", curX);
+    curX = 0;
+    request_redraw();
+}
+
+void
+add_sample(uint8_t y, uint8_t digital) {
     bool need_redraw = false;
-    bool end_of_sweep = (y == 0xff);
+    bool end_of_sweep = (y == 0xff) || (digital == 0xff);
 
     y = (voltage_factor * y) >> 8;
     
@@ -44,24 +62,12 @@ add_sample(uint8_t y) {
         ++curX;
         if (curX == SCREEN_WIDTH) {
             need_redraw = true;
-            ++curX;
+            curX = 0;
         }
     }
     
-    if (end_of_sweep) {
-        need_redraw = true;
-        curX = 0;
-    }
-    
-    if (need_redraw) {
-        SDL_Event event;
-        SDL_zero(event);
-        event.type = user_event_type_base;
-        event.user.code = UEVENT_DATA_READY;
-        event.user.data1 = nullptr;
-        event.user.data2 = nullptr;
-        SDL_PushEvent(&event);
-    }
+    if (need_redraw)
+        request_redraw();
 }
 
 int

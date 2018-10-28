@@ -220,8 +220,11 @@ main(int argc, char **argv) {
                 }
                 else {
                     if (pwm_total < 0xff) {
+                        double duty = ((double)pwm_high) / pwm_total;
                         ++pwm_total;
+                        pwm_high = (int)(0.5 + duty * pwm_total);
                         set_pwm_total(pwm_total);
+                        set_pwm_high(pwm_high);
                         dump_pwm_freq();
                     }
                 }
@@ -244,12 +247,11 @@ main(int argc, char **argv) {
                 }
                 else {
                     if (pwm_total > 2) {
+                        double duty = ((double)pwm_high) / pwm_total;
                         --pwm_total;
-                        if (pwm_high >= pwm_total) {
-                            pwm_high = pwm_total - 1;
-                            set_pwm_high(pwm_high);
-                        }
+                        pwm_high = (int)(0.5 + duty * pwm_total);
                         set_pwm_total(pwm_total);
+                        set_pwm_high(pwm_high);
                         dump_pwm_freq();
                     }
                 }
