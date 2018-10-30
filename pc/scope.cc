@@ -264,6 +264,16 @@ main(int argc, char **argv) {
                 set_op_mode(op_mode);
                 break;
 
+                case SDLK_x:
+                if (op_mode == OP_SCOPE)
+                    op_mode = OP_FULLSPEED_SCOPE;
+                else if (op_mode == OP_FULLSPEED_SCOPE)
+                    op_mode = OP_SCOPE;
+                else
+                    break;
+                set_op_mode(op_mode);
+                break;
+
                 case SDLK_t:
                 trig_type = (trig_type_t)(1 + (int)trig_type);
                 if (trig_type >= TRIG_MAX)

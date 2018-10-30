@@ -55,6 +55,7 @@ extern const uint16_t voltage_factors[];
 typedef enum {
     OP_SCOPE,
     OP_ZCD,
+    OP_FULLSPEED_SCOPE,
     OP_MAX
 } op_mode_t;
 

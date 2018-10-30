@@ -13,6 +13,7 @@ define({TRIG_RISING}, 1)
 define({TRIG_FALLING}, 2)
 define({OP_SCOPE}, 0)
 define({OP_ZCD}, 1)
+define({OP_FULLSPEED_SCOPE}, 2)
 
 ; flags in GPIOR0
 define({SEND_COMPLETE}, 0)
@@ -39,6 +40,18 @@ define({trig_type}, r25)
 ; recv_ptr Y[H,L], used by recvd_push and recvd_pop: r28, r29
 
 define({BAUDVALUE}, {eval((F_CPU / (8*($1))) - 1)})
+
+define({nop4}, nop2()
+    nop2())
+
+define({nop8}, nop4()
+    nop4())
+
+define({nop16}, nop8()
+    nop8())
+
+define({nop32}, nop16()
+    nop16())
 
 ; ------------------------------------------------------------------------------
 .CSEG
@@ -271,7 +284,7 @@ ENDFUNC ; set_zero_mode
 
 FUNCTION(set_op_mode)
     ; In: r16
-    andi(r16, 0x01)
+    andi(r16, 0x03)
     mov(op_mode, r16)
     brne(LOC(MODE_ZCD))
     ret()
@@ -699,6 +712,142 @@ FUNCTION(sampler_zcd)
 ENDFUNC ; sampler_zcd
 
 
+
+
+FUNCTION(sampler_fullspeed_scope)
+    ; Read the next sweep of samples from ADC
+    ldi(r16, NUM_SAMPLES / 4)
+    mov(r2, r16)
+
+    ldi(cmd_start_adc, _BV(ADEN, ADSC) | 2)
+    ldi(r17, _BV(ADEN) | 1) ; fullspeed prescaler setting
+
+  LOC(CHECK_TRIG):
+    clt() ; serial data receiver sets T to signal re-evaluating the trig conditions
+    cpi(trig_type, TRIG_RISING)
+    breq(LOC(WAIT_TRIG_RISING))
+    cpi(trig_type, TRIG_FALLING)
+    brne(LOC(START_SAMPLING))
+
+  LOC(WAIT_TRIG_FALLING): ; wait for trig pre-condition
+    brts(LOC(CHECK_TRIG))
+    rcall(read_adc)
+    cp(r16, trig_high)
+    brlo(LOC(WAIT_TRIG_FALLING))
+  LOC(WAIT_TRIG_FALLING_2): ; wait for trig condition
+    brts(LOC(CHECK_TRIG))
+    ; rcall(read_adc) ; inlined below to reclaim 3+4 clks of `rcall + ret`
+    sts(ADCSRA, cmd_start_adc)
+  LOC(WAIT_COMPLETE_F):
+    lds(r16, ADCSRA)
+    andi(r16, _BV(ADSC))
+    brne(LOC(WAIT_COMPLETE_F))
+    lds(r16, ADCH)
+    cp(r16, trig_low)
+    brlo(LOC(START_SAMPLING))
+    rjmp(LOC(WAIT_TRIG_FALLING_2))
+
+  LOC(WAIT_TRIG_RISING): ; wait for trig pre-condition
+    brts(LOC(CHECK_TRIG))
+    rcall(read_adc)
+    cp(r16, trig_low)
+    brsh(LOC(WAIT_TRIG_RISING))
+  LOC(WAIT_TRIG_RISING_2): ; wait for trig condition
+    brts(LOC(CHECK_TRIG))
+    ;rcall(read_adc) ; inlined below to reclaim 3+4 clks of `rcall + ret`
+    sts(ADCSRA, cmd_start_adc)
+  LOC(WAIT_COMPLETE_R):
+    lds(r16, ADCSRA)
+    andi(r16, _BV(ADSC))
+    brne(LOC(WAIT_COMPLETE_R))
+    lds(r16, ADCH)
+    cp(r16, trig_high)
+    brlo(LOC(WAIT_TRIG_RISING_2))
+
+  LOC(START_SAMPLING):
+    cli()
+    sts(ADCSRA, cmd_start_adc)
+
+  LOC(NEXT_SAMPLE):
+
+    ;lds(r16, ADCSRA)
+    ;andi(r16, _BV(ADSC))
+    ;brne(PC - 3)
+    rcall(LOC(WAIT))
+    lds(r16, ADCH) ; 2 clk
+    sts(ADCSRA, cmd_start_adc) ; 2 clk
+    st(X+, r16) ; 2 clk
+    in(r16, PIND) ; 1 clk
+    st(X+, r16) ; 2 clk
+
+    ;lds(r16, ADCSRA)
+    ;andi(r16, _BV(ADSC))
+    ;brne(PC - 3)
+    rcall(LOC(WAIT))
+    lds(r16, ADCH) ; 2 clk
+    sts(ADCSRA, cmd_start_adc) ; 2 clk
+    st(X+, r16) ; 2 clk
+    in(r16, PIND) ; 1 clk
+    st(X+, r16) ; 2 clk
+
+    ;lds(r16, ADCSRA)
+    ;andi(r16, _BV(ADSC))
+    ;brne(PC - 3)
+    rcall(LOC(WAIT))
+    lds(r16, ADCH) ; 2 clk
+    sts(ADCSRA, cmd_start_adc) ; 2 clk
+    st(X+, r16) ; 2 clk
+    in(r16, PIND) ; 1 clk
+    st(X+, r16) ; 2 clk
+
+    ;lds(r16, ADCSRA)
+    ;andi(r16, _BV(ADSC))
+    ;brne(PC - 3)
+    rcall(LOC(WAIT))
+    ; here: 44 CPUclks after start, = 13 ADCclks
+    lds(r16, ADCH) ; 2 clk
+    ; here: 41 CPUclks after start, that is the total sampling time
+    sts(ADCSRA, cmd_start_adc) ; 2 clk
+    st(X+, r16) ; 2 clk
+    in(r16, PIND) ; 1 clk
+    st(X+, r16) ; 2 clk
+
+    dec(r2) ; 1 clk
+    brne(LOC(NEXT_SAMPLE)) ; 2 clks
+
+    ret()
+
+  LOC(WAIT): ; rcall = 3 clks
+    ; here: 8 CPUclks after start = 2 ADCclks
+    nop2() ; 2 clks
+    nop2() ; 2 clks
+    ; here: 14 CPUclks after start = 3 ADCclks
+    nop2() ; 2 clks
+    nop2() ; 2 clks
+    ; here: 18 CPUclks after start = 4 ADCclks
+    nop2() ; 2 clks
+    nop2() ; 2 clks
+    ; here: 22 CPUclks after start = 5 ADCclks
+    nop2() ; 2 clks
+    nop2() ; 2 clks
+    ; here: 26 CPUclks after start = 6 ADCclks
+    nop2() ; 2 clks
+    nop2() ; 2 clks
+    ; here: 30 CPUclks after start = 7 ADCclks
+    sts(ADCSRA, r17) ; 2 clk, set to 1:2
+    nop2() ; 2 clks
+    ; here: = 34 CPUclks after start = 8 ADCclks
+    nop2();
+    ; here: = 36 CPUclks after start = 9 ADCclks
+    nop2();
+    ; here: = 38 CPUclks after start = 10 ADCclks
+    nop2();
+    ; here: = 40 CPUclks after start = 11 ADCclks
+    ret() ; 4 clks = +2 ADCclks
+    
+ENDFUNC ; sampler_fullspeed_scope
+
+
 ; ------------------------------------------------------------------------------
 
 FUNCTION(main)
@@ -800,6 +949,12 @@ FUNCTION(main)
     rcall(sampler_zcd)
     rjmp(LOC(SEND_SAMPLES))
   LOC(NOT_ZCD):
+
+    cpi(op_mode, OP_FULLSPEED_SCOPE)
+    brne(LOC(NOT_FULLSPEED_SCOPE))
+    rcall(sampler_fullspeed_scope)
+    rjmp(LOC(SEND_SAMPLES))
+  LOC(NOT_FULLSPEED_SCOPE):
 
   LOC(SEND_SAMPLES):
     ; Send the samples to the USART
