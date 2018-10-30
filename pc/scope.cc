@@ -20,7 +20,7 @@ int quit_notify_fds[2] = { -1, -1 };
 SDL_Renderer *renderer;
 uint32_t user_event_type_base;
 
-const int sample_times[] = { 1, 2, 5, 10, 20, 50, 100 }; // usec
+const int sample_times[] = { 2, 5, 10, 20, 50, 100 }; // usec
 const int voltages[] = { 5, 20 };
 const uint16_t voltage_factors[] = { 216, 250 }; // Vref / desired_unit * 256
 
@@ -232,7 +232,7 @@ main(int argc, char **argv) {
 
                 case SDLK_PAGEDOWN:
                 if (e.key.keysym.mod & KMOD_CTRL) {
-                    if (pwm_prescaler > 0) {
+                    if (pwm_prescaler > 1) {
                         --pwm_prescaler;
                         set_pwm_prescaler(pwm_prescaler);
                         dump_pwm_freq();

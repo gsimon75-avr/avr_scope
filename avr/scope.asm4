@@ -213,33 +213,33 @@ ENDFUNC ; recvd_pop_byte
 FUNCTION(set_sample_rate)
     ; In: r16
     ; Delay = 16 + 8*N clks -> N = delay/8 - 2
-    ; 0:   1 us =   16 clks, N =   0
-    ; 1:   2 us =   32 clks, N =   2
-    ; 2:   5 us =   80 clks, N =   8
-    ; 3:  10 us =  160 clks, N =  18
-    ; 4:  20 us =  320 clks, N =  38
-    ; 5:  50 us =  800 clks, N =  98
-    ; 6: 100 us = 1600 clks, N = 198
+    ; 0:   2 us =   32 clks, N =   2
+    ; 1:   5 us =   80 clks, N =   8
+    ; 2:  10 us =  160 clks, N =  18
+    ; 3:  20 us =  320 clks, N =  38
+    ; 4:  50 us =  800 clks, N =  98
+    ; 5: 100 us = 1600 clks, N = 198
     ldi(cmd_start_adc, _BV(ADEN, ADSC) | 2)
-    ldi(delay_counter_max, 0)
-    tst(r16)
-    breq(LOC(DONE))
     ldi(delay_counter_max, 2)
     dec(r16)
     breq(LOC(DONE))
-    ldi(cmd_start_adc, _BV(ADEN, ADSC) | 3)
+    ldi(cmd_start_adc, _BV(ADEN, ADSC) | 2)
     ldi(delay_counter_max, 8)
     dec(r16)
     breq(LOC(DONE))
+    ldi(cmd_start_adc, _BV(ADEN, ADSC) | 3)
     ldi(delay_counter_max, 18)
     dec(r16)
     breq(LOC(DONE))
+    ldi(cmd_start_adc, _BV(ADEN, ADSC) | 4)
     ldi(delay_counter_max, 38)
     dec(r16)
     breq(LOC(DONE))
+    ldi(cmd_start_adc, _BV(ADEN, ADSC) | 5)
     ldi(delay_counter_max, 98)
     dec(r16)
     breq(LOC(DONE))
+    ldi(cmd_start_adc, _BV(ADEN, ADSC) | 6)
     ldi(delay_counter_max, 198)
   LOC(DONE):
     mov(r16, delay_counter_max)
@@ -553,7 +553,6 @@ FUNCTION(sampler_analog_scope)
     ;  10 us =  160 clks, N =  18
     ;   5 us =   80 clks, N =   8
     ;   2 us =   32 clks, N =   2
-    ;   1 us =   16 clks, N =   0
     
   LOC(START_SAMPLING):
     cli()
