@@ -9,8 +9,11 @@ define({NUM_SAMPLES}, 800)
 define({USE_BAUD}, BAUDVALUE(250000))
 define({TRIG_HIST}, 4)
 define({TRIG_NONE}, 0)
-define({TRIG_RISING}, 1)
-define({TRIG_FALLING}, 2)
+define({TRIG_RISING_ANALOG}, 1)
+define({TRIG_FALLING_ANALOG}, 2)
+define({TRIG_RISING_DIGITAL}, 3)
+define({TRIG_FALLING_DIGITAL}, 4)
+
 define({OP_SCOPE}, 0)
 define({OP_ZCD}, 1)
 define({OP_FULLSPEED_SCOPE}, 2)
@@ -23,6 +26,7 @@ define({D_PWM}, 3)
 define({D_LED}, 2)
 define({C_IN_DC}, 0)
 define({C_IN_AC}, 1)
+define({DIGITAL_TRIGGER}, 0x80)
 
 ; register mapping
 define({trig_low}, r9)
@@ -234,7 +238,7 @@ FUNCTION(set_sample_rate)
     ; 5: 100 us = 1600 clks, N = 198
     ldi(cmd_start_adc, _BV(ADEN, ADSC) | 2)
     ldi(delay_counter_max, 2)
-    dec(r16)
+    tst(r16)
     breq(LOC(DONE))
     ldi(cmd_start_adc, _BV(ADEN, ADSC) | 2)
     ldi(delay_counter_max, 8)
@@ -286,8 +290,11 @@ FUNCTION(set_op_mode)
     ; In: r16
     andi(r16, 0x03)
     mov(op_mode, r16)
-    brne(LOC(MODE_ZCD))
+
+    cpi(r16, OP_ZCD)
+    breq(LOC(MODE_ZCD))
     ret()
+
   LOC(MODE_ZCD):
     clr(r16)
     sts(ADCSRA, r16)
@@ -297,7 +304,7 @@ ENDFUNC ; set_op_mode
 
 FUNCTION(set_trig_type)
     ; In: r16
-    andi(r16, 0x03)
+    andi(r16, 0x07)
     mov(trig_type, r16)
     set() ; re-check trig
     ret()
@@ -488,23 +495,26 @@ FUNCTION(read_adc)
 ENDFUNC ; read_adc
 
 
-FUNCTION(sampler_analog_scope)
-    ; Read the next sweep of samples from ADC
-    ldi(r16, NUM_SAMPLES / 4)
-    mov(r2, r16)
+FUNCTION(wait_trig)
   LOC(CHECK_TRIG):
     clt() ; serial data receiver sets T to signal re-evaluating the trig conditions
-    cpi(trig_type, TRIG_RISING)
-    breq(LOC(WAIT_TRIG_RISING))
-    cpi(trig_type, TRIG_FALLING)
-    brne(LOC(START_SAMPLING))
+    cpi(trig_type, TRIG_RISING_ANALOG)
+    breq(LOC(WAIT_TRIG_RISING_ANALOG))
+    cpi(trig_type, TRIG_FALLING_ANALOG)
+    breq(LOC(WAIT_TRIG_FALLING_ANALOG))
+    cpi(trig_type, TRIG_RISING_DIGITAL)
+    breq(LOC(WAIT_TRIG_RISING_DIGITAL))
+    cpi(trig_type, TRIG_FALLING_DIGITAL)
+    breq(LOC(WAIT_TRIG_FALLING_DIGITAL))
+  LOC(START_SAMPLING):
+    ret
 
-  LOC(WAIT_TRIG_FALLING): ; wait for trig pre-condition
+  LOC(WAIT_TRIG_FALLING_ANALOG): ; wait for trig pre-condition
     brts(LOC(CHECK_TRIG))
     rcall(read_adc)
     cp(r16, trig_high)
-    brlo(LOC(WAIT_TRIG_FALLING))
-  LOC(WAIT_TRIG_FALLING_2): ; wait for trig condition
+    brlo(LOC(WAIT_TRIG_FALLING_ANALOG))
+  LOC(WAIT_TRIG_FALLING_2_ANALOG): ; wait for trig condition
     brts(LOC(CHECK_TRIG))
     ; rcall(read_adc) ; inlined below to reclaim 3+4 clks of `rcall + ret`
     sts(ADCSRA, cmd_start_adc)
@@ -515,14 +525,14 @@ FUNCTION(sampler_analog_scope)
     lds(r16, ADCH)
     cp(r16, trig_low)
     brlo(LOC(START_SAMPLING))
-    rjmp(LOC(WAIT_TRIG_FALLING_2))
+    rjmp(LOC(WAIT_TRIG_FALLING_2_ANALOG))
 
-  LOC(WAIT_TRIG_RISING): ; wait for trig pre-condition
+  LOC(WAIT_TRIG_RISING_ANALOG): ; wait for trig pre-condition
     brts(LOC(CHECK_TRIG))
     rcall(read_adc)
     cp(r16, trig_low)
-    brsh(LOC(WAIT_TRIG_RISING))
-  LOC(WAIT_TRIG_RISING_2): ; wait for trig condition
+    brsh(LOC(WAIT_TRIG_RISING_ANALOG))
+  LOC(WAIT_TRIG_RISING_2_ANALOG): ; wait for trig condition
     brts(LOC(CHECK_TRIG))
     ;rcall(read_adc) ; inlined below to reclaim 3+4 clks of `rcall + ret`
     sts(ADCSRA, cmd_start_adc)
@@ -532,7 +542,41 @@ FUNCTION(sampler_analog_scope)
     brne(LOC(WAIT_COMPLETE_R))
     lds(r16, ADCH)
     cp(r16, trig_high)
-    brlo(LOC(WAIT_TRIG_RISING_2))
+    brsh(LOC(START_SAMPLING))
+    rjmp(LOC(WAIT_TRIG_RISING_2_ANALOG))
+
+  LOC(WAIT_TRIG_FALLING_DIGITAL): ; wait for trig pre-condition
+    brts(LOC(CHECK_TRIG))
+    in(r16, PIND)
+    andi(r16, DIGITAL_TRIGGER)
+    breq(LOC(WAIT_TRIG_FALLING_DIGITAL))
+  LOC(WAIT_TRIG_FALLING_2_DIGITAL): ; wait for trig condition
+    brts(LOC(CHECK_TRIG))
+    in(r16, PIND)
+    andi(r16, DIGITAL_TRIGGER)
+    breq(LOC(START_SAMPLING))
+    rjmp(LOC(WAIT_TRIG_FALLING_2_DIGITAL))
+
+  LOC(WAIT_TRIG_RISING_DIGITAL): ; wait for trig pre-condition
+    brts(LOC(CHECK_TRIG))
+    in(r16, PIND)
+    andi(r16, DIGITAL_TRIGGER)
+    brne(LOC(WAIT_TRIG_RISING_DIGITAL))
+  LOC(WAIT_TRIG_RISING_2_DIGITAL): ; wait for trig condition
+    brts(LOC(CHECK_TRIG))
+    in(r16, PIND)
+    andi(r16, DIGITAL_TRIGGER)
+    brne(LOC(START_SAMPLING))
+    rjmp(LOC(WAIT_TRIG_RISING_2_DIGITAL))
+ENDFUNC ; wait_trig
+
+
+FUNCTION(sampler_analog_scope)
+    ; Read the next sweep of samples from ADC
+    ldi(r16, NUM_SAMPLES / 4)
+    mov(r2, r16)
+
+    rcall(wait_trig)
 
     ; The point here is to create a delay loop with a constant and a repeatable part
     ; whose sum is a divisor of 16 clks and can express 1600 at top.
@@ -712,8 +756,6 @@ FUNCTION(sampler_zcd)
 ENDFUNC ; sampler_zcd
 
 
-
-
 FUNCTION(sampler_fullspeed_scope)
     ; Read the next sweep of samples from ADC
     ldi(r16, NUM_SAMPLES / 4)
@@ -722,47 +764,7 @@ FUNCTION(sampler_fullspeed_scope)
     ldi(cmd_start_adc, _BV(ADEN, ADSC) | 2)
     ldi(r17, _BV(ADEN) | 1) ; fullspeed prescaler setting
 
-  LOC(CHECK_TRIG):
-    clt() ; serial data receiver sets T to signal re-evaluating the trig conditions
-    cpi(trig_type, TRIG_RISING)
-    breq(LOC(WAIT_TRIG_RISING))
-    cpi(trig_type, TRIG_FALLING)
-    brne(LOC(START_SAMPLING))
-
-  LOC(WAIT_TRIG_FALLING): ; wait for trig pre-condition
-    brts(LOC(CHECK_TRIG))
-    rcall(read_adc)
-    cp(r16, trig_high)
-    brlo(LOC(WAIT_TRIG_FALLING))
-  LOC(WAIT_TRIG_FALLING_2): ; wait for trig condition
-    brts(LOC(CHECK_TRIG))
-    ; rcall(read_adc) ; inlined below to reclaim 3+4 clks of `rcall + ret`
-    sts(ADCSRA, cmd_start_adc)
-  LOC(WAIT_COMPLETE_F):
-    lds(r16, ADCSRA)
-    andi(r16, _BV(ADSC))
-    brne(LOC(WAIT_COMPLETE_F))
-    lds(r16, ADCH)
-    cp(r16, trig_low)
-    brlo(LOC(START_SAMPLING))
-    rjmp(LOC(WAIT_TRIG_FALLING_2))
-
-  LOC(WAIT_TRIG_RISING): ; wait for trig pre-condition
-    brts(LOC(CHECK_TRIG))
-    rcall(read_adc)
-    cp(r16, trig_low)
-    brsh(LOC(WAIT_TRIG_RISING))
-  LOC(WAIT_TRIG_RISING_2): ; wait for trig condition
-    brts(LOC(CHECK_TRIG))
-    ;rcall(read_adc) ; inlined below to reclaim 3+4 clks of `rcall + ret`
-    sts(ADCSRA, cmd_start_adc)
-  LOC(WAIT_COMPLETE_R):
-    lds(r16, ADCSRA)
-    andi(r16, _BV(ADSC))
-    brne(LOC(WAIT_COMPLETE_R))
-    lds(r16, ADCH)
-    cp(r16, trig_high)
-    brlo(LOC(WAIT_TRIG_RISING_2))
+    rcall(wait_trig)
 
   LOC(START_SAMPLING):
     cli()
@@ -770,9 +772,6 @@ FUNCTION(sampler_fullspeed_scope)
 
   LOC(NEXT_SAMPLE):
 
-    ;lds(r16, ADCSRA)
-    ;andi(r16, _BV(ADSC))
-    ;brne(PC - 3)
     rcall(LOC(WAIT))
     lds(r16, ADCH) ; 2 clk
     sts(ADCSRA, cmd_start_adc) ; 2 clk
@@ -780,33 +779,24 @@ FUNCTION(sampler_fullspeed_scope)
     in(r16, PIND) ; 1 clk
     st(X+, r16) ; 2 clk
 
-    ;lds(r16, ADCSRA)
-    ;andi(r16, _BV(ADSC))
-    ;brne(PC - 3)
-    rcall(LOC(WAIT))
-    lds(r16, ADCH) ; 2 clk
-    sts(ADCSRA, cmd_start_adc) ; 2 clk
-    st(X+, r16) ; 2 clk
-    in(r16, PIND) ; 1 clk
-    st(X+, r16) ; 2 clk
-
-    ;lds(r16, ADCSRA)
-    ;andi(r16, _BV(ADSC))
-    ;brne(PC - 3)
-    rcall(LOC(WAIT))
-    lds(r16, ADCH) ; 2 clk
-    sts(ADCSRA, cmd_start_adc) ; 2 clk
-    st(X+, r16) ; 2 clk
-    in(r16, PIND) ; 1 clk
-    st(X+, r16) ; 2 clk
-
-    ;lds(r16, ADCSRA)
-    ;andi(r16, _BV(ADSC))
-    ;brne(PC - 3)
     rcall(LOC(WAIT))
     ; here: 44 CPUclks after start, = 13 ADCclks
     lds(r16, ADCH) ; 2 clk
     ; here: 41 CPUclks after start, that is the total sampling time
+    sts(ADCSRA, cmd_start_adc) ; 2 clk
+    st(X+, r16) ; 2 clk
+    in(r16, PIND) ; 1 clk
+    st(X+, r16) ; 2 clk
+
+    rcall(LOC(WAIT))
+    lds(r16, ADCH) ; 2 clk
+    sts(ADCSRA, cmd_start_adc) ; 2 clk
+    st(X+, r16) ; 2 clk
+    in(r16, PIND) ; 1 clk
+    st(X+, r16) ; 2 clk
+
+    rcall(LOC(WAIT))
+    lds(r16, ADCH) ; 2 clk
     sts(ADCSRA, cmd_start_adc) ; 2 clk
     st(X+, r16) ; 2 clk
     in(r16, PIND) ; 1 clk
@@ -817,33 +807,34 @@ FUNCTION(sampler_fullspeed_scope)
 
     ret()
 
-  LOC(WAIT): ; rcall = 3 clks
+  LOC(WAIT):
+  LOC(WAIT_5_BITS): ; rcall = 3 clks
     ; here: 8 CPUclks after start = 2 ADCclks
     nop2() ; 2 clks
     nop2() ; 2 clks
-    ; here: 14 CPUclks after start = 3 ADCclks
+    ; here: 12 CPUclks after start = 3 ADCclks
     nop2() ; 2 clks
     nop2() ; 2 clks
-    ; here: 18 CPUclks after start = 4 ADCclks
+    ; here: 16 CPUclks after start = 4 ADCclks
     nop2() ; 2 clks
     nop2() ; 2 clks
-    ; here: 22 CPUclks after start = 5 ADCclks
+    ; here: 20 CPUclks after start = 5 ADCclks
     nop2() ; 2 clks
     nop2() ; 2 clks
-    ; here: 26 CPUclks after start = 6 ADCclks
+    ; here: 24 CPUclks after start = 6 ADCclks
     nop2() ; 2 clks
     nop2() ; 2 clks
-    ; here: 30 CPUclks after start = 7 ADCclks
+    ; here: 28 CPUclks after start = 7 ADCclks
+    nop2() ; 2 clks
+    nop2() ; 2 clks
+    ; here: 32 CPUclks after start = 8 ADCclks
     sts(ADCSRA, r17) ; 2 clk, set to 1:2
+    ; here: 34 CPUclks after start = 9 ADCclks
     nop2() ; 2 clks
-    ; here: = 34 CPUclks after start = 8 ADCclks
-    nop2();
-    ; here: = 36 CPUclks after start = 9 ADCclks
-    nop2();
-    ; here: = 38 CPUclks after start = 10 ADCclks
-    nop2();
-    ; here: = 40 CPUclks after start = 11 ADCclks
-    ret() ; 4 clks = +2 ADCclks
+    ; here: 36 CPUclks after start = 10 ADCclks
+    nop2() ; 2 clks
+    ; here: 38 CPUclks after start = 11 ADCclks
+    ret() ; 4 clks = +2 ADCclks -> 13 after return
     
 ENDFUNC ; sampler_fullspeed_scope
 
@@ -855,9 +846,9 @@ FUNCTION(main)
     ldi(r16, _BV(PRTWI, PRTIM0, PRSPI0))
     sts(PRR, r16)
 
-    ; D6 is input (comparator D+), D3 is output (pwm), D2 is output (led)
+    ; D3 is output (pwm), D2 is output (led), D[7,6,5,4] are inputs (digital)
     in(r16, DDRD)
-    andi(r16, ~_BV(6))
+    andi(r16, ~_BV(7,6,5,4))
     ori(r16, _BV(D_PWM, D_LED))
     out(DDRD, r16)
     
@@ -879,12 +870,9 @@ FUNCTION(main)
 
     ; Set up Comparator for Input Capture mode
     ldi(r16, _BV(ACME))
-    ;ldi(r16, 0)
     sts(ADCSRB, r16)
     ldi(r16, _BV(ACIC))
     out(ACSR, r16)
-    ldi(r16, _BV(AIND0))
-    sts(DIDR1, r16)
 
     ; Set up Timer2 for FastPWM mode
     ldi(r16, _BV(COM2B1, WGM21, WGM20))
@@ -925,7 +913,7 @@ FUNCTION(main)
     ldi(XH, samples >> 8)
 
     ; Set up trigger
-    ldi(trig_type, TRIG_RISING)
+    ldi(trig_type, TRIG_RISING_ANALOG)
     ldi(r16, 0x80)
     mov(trig_level, r16)
 

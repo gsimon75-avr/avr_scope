@@ -11,15 +11,18 @@
 #include <SDL.h>
 
 int curX = 0;
-uint32_t screen[SCREEN_HEIGHT*SCREEN_WIDTH];
-uint32_t* lastOfs[SCREEN_WIDTH];
-
-SDL_Texture *txt_screen;
-SDL_Rect dst_screen { SCREEN_X, SCREEN_Y, SCREEN_WIDTH, SCREEN_HEIGHT };
+uint32_t analog_screen[ANALOG_SCREEN_HEIGHT*ANALOG_SCREEN_WIDTH];
+SDL_Texture *txt_analog_screen;
+SDL_Rect dst_analog_screen { ANALOG_SCREEN_X, ANALOG_SCREEN_Y, ANALOG_SCREEN_WIDTH, ANALOG_SCREEN_HEIGHT };
+uint32_t* lastOfs[ANALOG_SCREEN_WIDTH];
 
 uint32_t density[DENSITY_HEIGHT*DENSITY_WIDTH], count_density[DENSITY_HEIGHT*DENSITY_WIDTH];
 SDL_Texture *txt_density;
 SDL_Rect dst_density { DENSITY_X, DENSITY_Y, DENSITY_WIDTH, DENSITY_HEIGHT };
+
+uint32_t digital_screen[DIGITAL_SCREEN_HEIGHT*DIGITAL_SCREEN_WIDTH];
+SDL_Texture *txt_digital_screen;
+SDL_Rect dst_digital_screen { DIGITAL_SCREEN_X, DIGITAL_SCREEN_Y, DIGITAL_SCREEN_WIDTH, DIGITAL_SCREEN_HEIGHT };
 
 void
 request_redraw() {
@@ -42,8 +45,8 @@ end_of_sweep() {
 
 void
 add_sample(uint8_t y, uint8_t digital) {
+    static const uint8_t digital_mask[] = { 0x80, 0x40, 0x20, 0x10 }; // masks for digital lines to display (add 0x08 for to show the pwm output as well)
     bool need_redraw = false;
-    bool end_of_sweep = (y == 0xff) || (digital == 0xff);
 
     y = (voltage_factor * y) >> 8;
     
@@ -56,10 +59,10 @@ add_sample(uint8_t y, uint8_t digital) {
         need_redraw = true;
     }
 
-    if (curX < SCREEN_WIDTH) {
+    if (curX < ANALOG_SCREEN_WIDTH) {
         reinterpret_cast<uint8_t*>(lastOfs[curX])[0] = 0;
         reinterpret_cast<uint8_t*>(lastOfs[curX])[1] = 0;
-        lastOfs[curX] = &screen[(SCREEN_WIDTH * (unsigned int)(255 - y)) + curX];
+        lastOfs[curX] = &analog_screen[(ANALOG_SCREEN_WIDTH * (unsigned int)(255 - y)) + curX];
         if (digital & 0x08) {
             reinterpret_cast<uint8_t*>(lastOfs[curX])[0] = 0xff;
             reinterpret_cast<uint8_t*>(lastOfs[curX])[1] = 0x7f;
@@ -67,8 +70,19 @@ add_sample(uint8_t y, uint8_t digital) {
         else {
             reinterpret_cast<uint8_t*>(lastOfs[curX])[1] = 0xff;
         }
+
+
+        for (int j = 0; j < sizeof(digital_mask); ++j) {
+            int y = j * 3;
+            digital_screen[DIGITAL_SCREEN_WIDTH*y + curX] &= 0xff0000;
+            if (digital & digital_mask[j])
+                digital_screen[DIGITAL_SCREEN_WIDTH*y + curX] |= 0xff00;
+            else
+                digital_screen[DIGITAL_SCREEN_WIDTH*y + curX] |= 0x3f00;
+        }
+
         ++curX;
-        if (curX == SCREEN_WIDTH) {
+        if (curX == ANALOG_SCREEN_WIDTH) {
             need_redraw = true;
             curX = 0;
         }
@@ -90,34 +104,37 @@ dash_width(int i) {
 void
 draw_grid(void) {
     // draw grid
-    for (int i = 0; i < SCREEN_WIDTH; i += 10) {
+    for (int i = 0; i < ANALOG_SCREEN_WIDTH; i += 10) {
         int fill = dash_width(i / 10);
-        for (int j = 0; j < SCREEN_HEIGHT; j += 10)
+        for (int j = 0; j < ANALOG_SCREEN_HEIGHT; j += 10)
             for (int k = -fill; k <= fill; ++k) {
                 int y = j + k;
-                if ((0 <= y) && (y < SCREEN_HEIGHT))
-                    screen[SCREEN_WIDTH*(SCREEN_HEIGHT-1-y) + i] = 0x7f0000;
+                if ((0 <= y) && (y < ANALOG_SCREEN_HEIGHT))
+                    analog_screen[ANALOG_SCREEN_WIDTH*(ANALOG_SCREEN_HEIGHT-1-y) + i] = 0x7f0000;
             }
+        for (int j = 0; j < DIGITAL_SCREEN_HEIGHT; j += 2)
+            digital_screen[DIGITAL_SCREEN_WIDTH*(DIGITAL_SCREEN_HEIGHT-1-j) + i] = 0x7f0000;
     }
-    for (int j = 0; j < SCREEN_HEIGHT; j += 10) {
+    for (int j = 0; j < ANALOG_SCREEN_HEIGHT; j += 10) {
         int fill = dash_width(j / 10);
-        for (int i = 0; i < SCREEN_WIDTH; i += 10)
+        for (int i = 0; i < ANALOG_SCREEN_WIDTH; i += 10)
             for (int k = -fill; k <= fill; ++k) {
                 int x = i + k;
-                if ((0 <= x) && (x < SCREEN_WIDTH))
-                    screen[SCREEN_WIDTH*(SCREEN_HEIGHT-1-j) + i+k] = 0x7f0000;
+                if ((0 <= x) && (x < ANALOG_SCREEN_WIDTH))
+                    analog_screen[ANALOG_SCREEN_WIDTH*(ANALOG_SCREEN_HEIGHT-1-j) + i+k] = 0x7f0000;
             }
     }
 }
 
 void
 init_screen() {
-    for (int i = 0; i < SCREEN_WIDTH; ++i)
-        lastOfs[i] = &screen[0];
+    for (int i = 0; i < ANALOG_SCREEN_WIDTH; ++i)
+        lastOfs[i] = &analog_screen[0];
 
     memset(density, 0, sizeof(density));
 
-    txt_screen = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, SCREEN_WIDTH, SCREEN_HEIGHT); // 0xrrggbb
+    txt_analog_screen = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, ANALOG_SCREEN_WIDTH, ANALOG_SCREEN_HEIGHT); // 0xrrggbb
+    txt_digital_screen = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, DIGITAL_SCREEN_WIDTH, DIGITAL_SCREEN_HEIGHT); // 0xrrggbb
     txt_density = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, DENSITY_WIDTH, DENSITY_HEIGHT); // 0xrrggbb
 
     draw_grid();
@@ -126,8 +143,10 @@ init_screen() {
 
 void
 redraw_screen() {
-    SDL_UpdateTexture(txt_screen, nullptr, &screen, 4*SCREEN_WIDTH);
-    SDL_RenderCopy(renderer, txt_screen, nullptr, &dst_screen);
+    SDL_UpdateTexture(txt_analog_screen, nullptr, &analog_screen, 4*ANALOG_SCREEN_WIDTH);
+    SDL_RenderCopy(renderer, txt_analog_screen, nullptr, &dst_analog_screen);
+    SDL_UpdateTexture(txt_digital_screen, nullptr, &digital_screen, 4*DIGITAL_SCREEN_WIDTH);
+    SDL_RenderCopy(renderer, txt_digital_screen, nullptr, &dst_digital_screen);
     SDL_UpdateTexture(txt_density, nullptr, &density, 4*DENSITY_WIDTH);
     SDL_RenderCopy(renderer, txt_density, nullptr, &dst_density);
     SDL_RenderPresent(renderer);
@@ -135,6 +154,7 @@ redraw_screen() {
 
 void
 shutdown_screen() {
-    SDL_DestroyTexture(txt_screen);
+    SDL_DestroyTexture(txt_analog_screen);
+    SDL_DestroyTexture(txt_digital_screen);
     SDL_DestroyTexture(txt_density);
 }

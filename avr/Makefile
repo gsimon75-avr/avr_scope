@@ -42,7 +42,8 @@ rdfuses:
 		@echo -n "Low  Fuse Byte: "; $(AD) $(ADFLAGS) -F -q -q -U lfuse:r:-:h
 
 wrfuses:                
-		$(AD) $(ADFLAGS) -F -U lfuse:w:0xd7:m
+		$(AD) $(ADFLAGS) -F -U lfuse:w:0x97:m
+		#$(AD) $(ADFLAGS) -F -U lfuse:w:0xd7:m
 		$(AD) $(ADFLAGS) -F -U hfuse:w:0xd1:m
 		$(AD) $(ADFLAGS) -F -U efuse:w:0xfc:m
 

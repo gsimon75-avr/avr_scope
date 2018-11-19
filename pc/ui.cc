@@ -131,8 +131,10 @@ redraw_voltage_scale(int mV) {
 
 void
 redraw_trig_marker(uint8_t n, trig_type_t type) {
+    static const char trig_type_char[] = { ' ', '/', '\\', 'R', 'F' };
     memset(trig_marker, 0, sizeof(trig_marker));
-    char c = (type == TRIG_FALLING) ? '-' : (type == TRIG_RISING) ? '+' : ' ';
+    char c = trig_type_char[(int)type];
+    
     putchar(trig_marker, TRIG_MARKER_WIDTH, 0, TRIG_MARKER_HEIGHT - n + 4, c, 0xffffff);
     SDL_UpdateTexture(txt_trig_marker, nullptr, &trig_marker, 4*TRIG_MARKER_WIDTH);
     SDL_RenderCopy(renderer, txt_trig_marker, nullptr, &dst_trig_marker);

@@ -29,7 +29,7 @@ op_mode_t op_mode = OP_SCOPE;
 int sample_rate = 3;
 int voltage_ref = 1;
 int zero_level = 1; // 0:DC, 1:AC
-trig_type_t trig_type = TRIG_FALLING;
+trig_type_t trig_type = TRIG_FALLING_ANALOG;
 uint8_t trig_level = 0x40;
 
 uint8_t pwm_prescaler = 6;
@@ -115,7 +115,7 @@ main(int argc, char **argv) {
 
     SDL_Init(SDL_INIT_VIDEO);
     user_event_type_base = SDL_RegisterEvents(1);
-    SDL_Window *window = SDL_CreateWindow("yadda", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, WINDOW_WIDTH, WINDOW_HEIGHT, 0);
+    SDL_Window *window = SDL_CreateWindow("AVR Scope", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, WINDOW_WIDTH, WINDOW_HEIGHT, 0);
     renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     SDL_RenderClear(renderer);
 
@@ -262,6 +262,10 @@ main(int argc, char **argv) {
                 if (op_mode >= OP_MAX)
                     op_mode = (op_mode_t)0;
                 set_op_mode(op_mode);
+                if (op_mode == OP_SCOPE)
+                    redraw_time_scale(sample_times[sample_rate]);
+                else
+                    redraw_time_scale(0);
                 break;
 
                 case SDLK_x:
@@ -272,6 +276,10 @@ main(int argc, char **argv) {
                 else
                     break;
                 set_op_mode(op_mode);
+                if (op_mode == OP_SCOPE)
+                    redraw_time_scale(sample_times[sample_rate]);
+                else
+                    redraw_time_scale(0);
                 break;
 
                 case SDLK_t:

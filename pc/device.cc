@@ -20,7 +20,7 @@
 #endif // __LINUX__, __FreeBSD__
 #include <SDL.h>
 
-SDL_Thread *thr_serial;
+SDL_Thread *thr_serial = nullptr;
 
 int fd_serial = -1;
 //const char init_cmd[] = "1R6S80L0T4p0ch31t";
@@ -103,8 +103,8 @@ set_op_mode(op_mode_t m) {
 void
 set_sample_rate(uint8_t n) {
     char buf[32];
-    printf("sample_rate=%d\n", n);
     snprintf(buf, sizeof(buf), "%XS", n);
+    printf("sample_rate=%d (%s)\n", n, buf);
     usleep(1000); write(fd_serial, buf + 0, 1);
     usleep(1000); write(fd_serial, buf + 1, 1);
 }
@@ -143,7 +143,7 @@ void
 set_trig_type(trig_type_t type) {
     char buf[32];
     printf("trig_type=%d\n", type);
-    snprintf(buf, sizeof(buf), "%XT", type & 3);
+    snprintf(buf, sizeof(buf), "%XT", type & 7);
     usleep(1000); write(fd_serial, buf + 0, 1);
     usleep(1000); write(fd_serial, buf + 1, 1);
 }
@@ -185,6 +185,11 @@ init_device(const char *devname) {
 #elif __FreeBSD__
     fd_serial = open("/dev/ttyU1", O_RDWR);
 #endif
+    if (fd_serial < 0) {
+        printf("Cannot open serial device: %s\n", strerror(errno));
+        do_quit = 1;
+        return;
+    }
     struct termios tio;
     tio.c_iflag = INPCK | IGNPAR;
     tio.c_oflag = 0;
@@ -218,6 +223,8 @@ init_device(const char *devname) {
 void
 shutdown_device() {
     printf("waiting for thread\n");
-    SDL_WaitThread(thr_serial, nullptr);
-    close(fd_serial);
+    if (thr_serial)
+        SDL_WaitThread(thr_serial, nullptr);
+    if (fd_serial >= 0)
+        close(fd_serial);
 }
