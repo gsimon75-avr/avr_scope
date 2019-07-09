@@ -10,7 +10,7 @@ ADC0
 
 ## Protocol
 
-PC->AVR: stack-like commands, args first as hex digits, then 1-letter commands, unknown chars are ignored
+PC to AVR: stack-like commands, args first as hex digits, then 1-letter commands, unknown chars are ignored
 
 <n>S: adc prescaler, 7..1, 1 is too fast
 <nn>W: scan width = 0x20 * nn
@@ -18,7 +18,7 @@ PC->AVR: stack-like commands, args first as hex digits, then 1-letter commands, 
 <nn>t: falling trig level nn
 <n>H: trig hysteresis n
 
-AVR->PC: byte stream of <width> scans, 0..0xfe
+AVR to PC: byte stream of <width> scans, 0..0xfe
 the last byte is always 0xff to provide sync info
 
 
